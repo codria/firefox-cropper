@@ -22,7 +22,24 @@
 
 ## インストール
 
-### A. まず試す (再起動で消える)
+### 使うだけなら
+
+[Releases](https://github.com/codria/firefox-cropper/releases) から最新の
+`frame-cropper-x.y.z.xpi` をダウンロードし、`about:addons` にドラッグする。
+
+Mozilla の署名が付いているので、どの Firefox でもそのまま入る
+(unlisted 署名は「AMO のカタログに載らない」という意味で、署名済みの `.xpi` 自体は
+配布者のアカウントに紐づかない)。新しい版が出れば自動で更新される。
+
+必要な環境は **Firefox 140 以降のデスクトップ版**。
+Firefox for Android は `storage.sync` を同期せず、ブラウザズームによる拡大も
+前提にしづらいため対象外。
+
+---
+
+以下は自分でビルド・署名する場合の手順。
+
+### A. 開発中に試す (再起動で消える)
 
 1. Firefox で `about:debugging#/runtime/this-firefox`
 2. 「**一時的なアドオンを読み込む**」→ このフォルダの `manifest.json` を選ぶ
