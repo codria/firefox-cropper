@@ -105,10 +105,17 @@ const storeReady = migrateToSync()
    端末に降りてきていない」のどちらか。件数を見比べれば切り分けられる。
    サイトのキー自体は URL なので、件数だけを返して中身は出さない。 */
 async function syncStatus() {
+  /* 新旧どちらのレイアウトも数える。旧キー (sites) だけを見ていると、
+     splitSites で s:<キー> に分割した後は常に 0 と表示され、
+     「同期が効いていない」と誤診する材料になる。 */
   const count = async (area) => {
     try {
-      const d = await api.storage[area].get('sites');
-      return d.sites ? Object.keys(d.sites).length : 0;
+      const all = await api.storage[area].get(null);
+      const keys = new Set(Object.keys(all.sites || {}));
+      for (const k of Object.keys(all)) {
+        if (k.startsWith(SITE_PREFIX)) keys.add(k.slice(SITE_PREFIX.length));
+      }
+      return keys.size;
     } catch (_) { return null; }
   };
   return {
