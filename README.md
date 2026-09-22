@@ -45,7 +45,7 @@ API キーは https://addons.mozilla.org/developers/addon/api/key/ で発行。
 
 ## 使い方
 
-**覚えるのは Alt+Shift+Z ひとつだけ。**押すたびに状態が 1 周する:
+**覚えるのは Alt+Shift+Z ひとつだけ**。押すたびに状態が 1 周する:
 
 ```
 OFF ─→ 候補1 ─→ 候補2 ─→ … ─→ 候補N ─→ OFF ─→ …
