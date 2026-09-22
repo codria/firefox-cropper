@@ -44,7 +44,15 @@ async function refresh() {
 }
 
 let lastFrames = [];
+let usefulFrames = [];
 let lastZoom = null;
+
+function mkLine(text) {
+  const d = document.createElement('div');
+  d.className = 'saved';
+  d.textContent = text;
+  return d;
+}
 
 function shortSrc(src) {
   if (!src) return '(src なし)';
@@ -59,7 +67,8 @@ async function loadCandidates() {
   lastFrames = (res && res.frames) || [];
   lastZoom = (res && res.zoom) || null;
   const total = lastFrames.reduce((n, f) => n + f.list.length, 0);
-  $('candCount').textContent = '(' + total + ' / ' + lastFrames.length + 'フレーム)';
+  const shown = lastFrames.filter((f) => f.list.length || f.targetInfo).length;
+  $('candCount').textContent = '(' + total + ' / ' + shown + 'フレーム)';
   box.textContent = '';
 
   // ブラウザズームの現況と、最後の操作の結果 (失敗していればその理由)
@@ -96,7 +105,16 @@ async function loadCandidates() {
     return;
   }
 
-  for (const fr of lastFrames) {
+  /* 候補も対象も無いフレームは省く。トラッキング用の 1x1、SNS ウィジェット、
+     about:blank などが大半を占め、一覧も JSON も無用に長くなる。
+     「いくつ省いたか」は切り分けの材料になるので件数だけ残す。 */
+  usefulFrames = lastFrames.filter((f) => f.list.length || f.targetInfo);
+  const skipped = lastFrames.length - usefulFrames.length;
+  if (skipped) {
+    box.appendChild(mkLine('候補も対象も無いフレーム ' + skipped + ' 件は省略'));
+  }
+
+  for (const fr of usefulFrames) {
     const head = document.createElement('div');
     head.className = 'frameHead';
     const cur = fr.list.find((c) => c.current);
@@ -249,7 +267,7 @@ async function init() {
   $('candBox').addEventListener('toggle', (e) => { if (e.target.open) loadCandidates(); });
   $('copy').addEventListener('click', async (e) => {
     e.preventDefault();
-    await navigator.clipboard.writeText(JSON.stringify({ url: tab.url, zoom: lastZoom, frames: lastFrames }, null, 1));
+    await navigator.clipboard.writeText(JSON.stringify({ url: tab.url, zoom: lastZoom, frames: usefulFrames }, null, 1));
     e.target.textContent = 'コピーしました';
     setTimeout(() => { e.target.textContent = '一覧を JSON でコピー'; }, 1500);
   });
