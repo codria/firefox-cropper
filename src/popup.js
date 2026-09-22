@@ -239,26 +239,14 @@ async function init() {
     await refresh();
     if ($('candBox').open) await loadCandidates();
   });
-  /* 片方を開いたらもう片方を閉じる。
-     両方開くと 696px になり、Firefox のポップアップ上限 600px を超えて
-     「全体スクロール + 一覧の内側スクロール」の二重スクロールになる。
-     片方だけなら 510px で収まる。 */
-  $('siteBox').addEventListener('toggle', (e) => {
-    if (!e.target.open) return;
-    $('candBox').open = false;
-    loadSites();
-  });
+  $('siteBox').addEventListener('toggle', (e) => { if (e.target.open) loadSites(); });
   $('restore').addEventListener('click', async () => {
     const res = await bg('popup:restoreFromLocal');
     $('syncInfo').textContent = '復元しました: ' + ((res && res.restored) || 0) + '件';
     await refresh();
     if ($('siteBox').open) await loadSites();
   });
-  $('candBox').addEventListener('toggle', (e) => {
-    if (!e.target.open) return;
-    $('siteBox').open = false;
-    loadCandidates();
-  });
+  $('candBox').addEventListener('toggle', (e) => { if (e.target.open) loadCandidates(); });
   $('copy').addEventListener('click', async (e) => {
     e.preventDefault();
     await navigator.clipboard.writeText(JSON.stringify({ url: tab.url, zoom: lastZoom, frames: lastFrames }, null, 1));

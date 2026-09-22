@@ -110,7 +110,10 @@ details {
 }
 summary { cursor: pointer; font-size: 11px; color: var(--dim); }
 
-.cands { margin: 8px 0; max-height: 300px; overflow-y: auto; }
+/* 内側でスクロールさせない。ポップアップは上限 600px で外側がスクロールするため、
+   ここにも max-height を置くとスクロール領域が 2 つ重なって扱いづらくなる。
+   一覧が長くなっても、スクロールバーは外側の 1 本だけにする。 */
+.cands { margin: 8px 0; }
 
 .frameHead {
   margin: 10px 0 5px;
