@@ -20,3 +20,8 @@ desktop.ini
 *.pem
 web-ext-config.local.*
 .web-ext-config.*
+
+# web-ext sign が作る状態ファイル。AMO 上のアドオンを特定する UUID が入る。
+# 秘密ではないがローカル状態なので追跡しない (残っているとリリース前の
+# 「作業ツリーが綺麗か」チェックに引っかかる)
+.amo-upload-uuid

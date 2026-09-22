@@ -56,6 +56,31 @@ npx --yes web-ext lint --source-dir .
 現状は Firefox for Android の互換性に関する warning が 1 件出るが、
 デスクトップ専用のこのツールには影響しない。
 
+### D. 複数PCで使う (自動更新)
+
+`manifest.json` に `update_url` を書いてあり、Firefox が定期的に
+[updates.json](updates.json) を見に行く。新規PCでは
+[Releases](https://github.com/codria/firefox-cropper/releases) から `.xpi` を
+一度だけ `about:addons` にドラッグすれば、以降の更新は自動で入る。
+
+設定 (対象セレクタ / 表示のしかた / 自動適用) は `storage.local` に入るため
+**プロファイルごとで、PC 間では共有されない**。Firefox Sync の対象外。
+
+#### リリース手順
+
+```bash
+bash tools/release.sh 0.3.0
+```
+
+バージョンを上げ、署名し、Release を作り、`updates.json` を書き換えるまでを行う。
+手作業だと 4 ステップあり、特に**順序を間違えやすい** — `updates.json` を Release
+作成より先に push すると、その間 Firefox が「存在しない `.xpi`」を指す更新情報を
+読むことになる。スクリプトは commit を 2 つに分けてこれを避ける。
+
+実行前に、作業ツリーが綺麗か / バージョンが現在より大きいか / タグが未使用かを
+まとめて確認する (途中で失敗すると中途半端な状態が残るため)。
+最後に配信経路 2 本の HTTP ステータスを実際に取って確かめる。
+
 ### C. 署名を回避する (Developer Edition / Nightly / ESR のみ)
 
 `about:config` → `xpinstall.signatures.required` を `false`。製品版では効かない。
@@ -304,6 +329,8 @@ src/background.js      タブ単位の ON/OFF 管理、全フレームへの配�
 src/popup.*            設定パネル
 tools/inspect-frames.js  調査用コンソールスニペット (テキストのみ出力)
 tools/fixture.html       罠を全部盛りにした検証用ページ
+tools/release.sh         署名 → Release 作成 → updates.json 更新 を一括で行う
+updates.json             Firefox が見に行く更新情報。Release 作成後に更新する
 ```
 
 ## ライセンス
