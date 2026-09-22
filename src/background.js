@@ -85,7 +85,39 @@ async function migrateToSync() {
 
 /* 移行が終わるまで読み書きを待たせる。待たないと、移行中の読み取りが
    空の sync を見てしまい「設定が消えた」ように見える。 */
-const storeReady = migrateToSync().catch((e) => { storeError = '移行: ' + e.message; });
+/* 旧レイアウト (sites に全部入り) を 1 サイト 1 項目へ分割する。
+   分割後も getSites() は両方を読むので、片方の端末が古いままでも壊れない。 */
+async function splitSites() {
+  const all = await STORE.get('sites');
+  if (!all.sites || !Object.keys(all.sites).length) return;
+  const obj = {};
+  for (const k of Object.keys(all.sites)) obj[SITE_PREFIX + k] = all.sites[k];
+  await STORE.set(obj);
+  await STORE.remove('sites');
+}
+
+const storeReady = migrateToSync()
+  .then(splitSites)
+  .catch((e) => { storeError = '移行: ' + e.message; });
+
+/* どちらの保存領域に何件入っているかを返す。
+   同期が効いていない時、原因は「sync に書けていない」「sync にはあるが
+   端末に降りてきていない」のどちらか。件数を見比べれば切り分けられる。
+   サイトのキー自体は URL なので、件数だけを返して中身は出さない。 */
+async function syncStatus() {
+  const count = async (area) => {
+    try {
+      const d = await api.storage[area].get('sites');
+      return d.sites ? Object.keys(d.sites).length : 0;
+    } catch (_) { return null; }
+  };
+  return {
+    enabled: SYNCED,
+    error: storeError,
+    syncCount: await count('sync'),
+    localCount: await count('local'),
+  };
+}
 
 async function storeSet(obj) {
   await storeReady;
@@ -135,17 +167,40 @@ async function getSettings() {
   return Object.assign({}, DEFAULTS, got.settings || {});
 }
 
+/* サイト設定は「1 サイト = 1 項目」で持つ。
+   全サイトを 1 項目にまとめると、書き込みのたびに全体を置き換えることになり、
+   エントリの少ない端末が書いた時点で他端末の設定を消してしまう
+   (storage.sync は項目単位で突き合わせるので、触らない項目は無事)。
+   1 項目 8192 バイトの上限にも掛かりにくくなる。 */
+const SITE_PREFIX = 's:';
+
 async function getSites() {
   await storeReady;
-  const got = await STORE.get('sites');
-  return got.sites || {};
+  const all = await STORE.get(null);
+  const out = {};
+  // 旧レイアウト (sites に全部入り) も読む。移行前の端末が書いたものが残り得る
+  if (all.sites) Object.assign(out, all.sites);
+  for (const k of Object.keys(all)) {
+    if (k.startsWith(SITE_PREFIX)) out[k.slice(SITE_PREFIX.length)] = all[k];
+  }
+  return out;
 }
 
-async function patchSite(host, patch) {
-  if (!host) return;
+async function patchSite(key, patch) {
+  if (!key) return;
   const sites = await getSites();
-  sites[host] = Object.assign({}, sites[host], patch);
-  await storeSet({ sites });
+  await storeSet({ [SITE_PREFIX + key]: Object.assign({}, sites[key], patch) });
+}
+
+async function removeSite(key) {
+  await storeReady;
+  await STORE.remove(SITE_PREFIX + key);
+  // 旧レイアウトに残っている分も落とす
+  const all = await STORE.get('sites');
+  if (all.sites && key in all.sites) {
+    delete all.sites[key];
+    await storeSet({ sites: all.sites });
+  }
 }
 
 async function payloadFor(url) {
@@ -287,12 +342,11 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
       if (msg.isTop) {
         await patchSite(topHost, { selector: msg.selector });
       } else {
-        // 内側フレームの選択は「サイト → フレームのホスト → セレクタ」で覚える
+        // 内側フレームの選択は「サイト → フレームのキー → セレクタ」で覚える。
+        // patchSite 経由にして、触るのはこのサイトの 1 項目だけにする
         const sites = await getSites();
-        const site = Object.assign({}, sites[topHost]);
-        site.sub = Object.assign({}, site.sub, { [msg.frameKey]: msg.selector });
-        sites[topHost] = site;
-        await storeSet({ sites });
+        const sub = Object.assign({}, (sites[topHost] || {}).sub, { [msg.frameKey]: msg.selector });
+        await patchSite(topHost, { sub });
       }
       if (!activeTabs.has(tabId)) { if (tab) await activate(tabId, tab.url); }
       else {
@@ -372,7 +426,7 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
         host,
         settings: await getSettings(),
         site: await siteFor(t.url),
-        sync: { enabled: SYNCED, error: storeError }
+        sync: await syncStatus()
       };
     }
 
@@ -457,14 +511,32 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
     }
 
     case 'popup:deleteSite': {
-      const sites = await getSites();
-      delete sites[msg.key];
-      await storeSet({ sites });
+      await removeSite(msg.key);
       // 今開いているサイトを消したなら、その場の切り抜きも解除する
       if (msg.tab && siteKeyOf(msg.tab.url) === msg.key && activeTabs.has(msg.tab.id)) {
         deactivate(msg.tab.id);
       }
       return { ffc: true, ok: true };
+    }
+
+    /* storage.local に残っている設定を sync へ戻す。
+       sites を 1 項目に丸ごと入れていたため、エントリの少ない端末が
+       書き込むと全体を置き換えてしまう事故が起きる。その復旧用。
+       消さずに「和集合」で入れる — 復元によって別端末の設定を
+       巻き添えで消さないため。 */
+    case 'popup:restoreFromLocal': {
+      const local = await api.storage.local.get(['sites', 'settings']);
+      const cur = { sites: await getSites(), settings: await getSettings() };
+      const merged = Object.assign({}, local.sites || {}, cur.sites);
+      // 同じキーがある場合、エントリ数の多い方 (情報量の多い方) を採る
+      for (const k of Object.keys(local.sites || {})) {
+        const a = local.sites[k] || {}, b = cur.sites[k] || {};
+        merged[k] = Object.keys(a).length >= Object.keys(b).length ? a : b;
+      }
+      const obj = { settings: Object.assign({}, local.settings || {}, cur.settings || {}) };
+      for (const k of Object.keys(merged)) obj[SITE_PREFIX + k] = merged[k];
+      await storeSet(obj);
+      return { ffc: true, restored: Object.keys(merged).length };
     }
 
     case 'popup:clearSelector':

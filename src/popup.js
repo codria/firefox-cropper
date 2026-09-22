@@ -29,11 +29,14 @@ function paint(st) {
     el.textContent = '⚠ 設定の保存に失敗: ' + sync.error;
     el.style.color = '#d3455b';
   } else {
-    el.textContent = sync.enabled
-      ? '設定は端末間で同期されます (Firefox アカウント経由)'
-      : '設定はこの端末にのみ保存されます';
+    const n = (v) => (v === null || v === undefined ? '?' : v + '件');
+    el.textContent = (sync.enabled ? '同期あり' : 'この端末のみ')
+      + '   sync: ' + n(sync.syncCount) + ' / local: ' + n(sync.localCount);
     el.style.removeProperty('color');
   }
+  // local にしか無い設定がある時だけ復元ボタンを出す
+  const canRestore = (sync.localCount || 0) > (sync.syncCount || 0);
+  $('restoreRow').style.display = canRestore ? '' : 'none';
 }
 
 async function refresh() {
@@ -237,6 +240,12 @@ async function init() {
     if ($('candBox').open) await loadCandidates();
   });
   $('siteBox').addEventListener('toggle', (e) => { if (e.target.open) loadSites(); });
+  $('restore').addEventListener('click', async () => {
+    const res = await bg('popup:restoreFromLocal');
+    $('syncInfo').textContent = '復元しました: ' + ((res && res.restored) || 0) + '件';
+    await refresh();
+    if ($('siteBox').open) await loadSites();
+  });
   $('candBox').addEventListener('toggle', (e) => { if (e.target.open) loadCandidates(); });
   $('copy').addEventListener('click', async (e) => {
     e.preventDefault();
