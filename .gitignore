@@ -12,3 +12,11 @@ node_modules/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 秘密情報。AMO の API キーはリポジトリ外 (~/.web-ext-config.cjs) に置く方針だが、
+# 取り違えて中に置いてしまった時の保険として弾いておく
+.env
+.env.*
+*.pem
+web-ext-config.local.*
+.web-ext-config.*
