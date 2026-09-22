@@ -59,6 +59,17 @@ body {
   white-space: nowrap;
 }
 
+/* 「このページの設定」と「全体の設定」の境目。
+   どちらに属するかが見えていないと、片方のつもりで全体を変えてしまう。 */
+.section {
+  margin: 14px 0 6px;
+  padding-bottom: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  border-bottom: 1px solid var(--line);
+}
+
 .row { margin: 10px 0; }
 .row label { display: block; margin-bottom: 4px; font-size: 11px; color: var(--dim); }
 

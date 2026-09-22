@@ -8,6 +8,10 @@
   <button id="toggle" class="toggle">切り抜き ON</button>
   <div id="host" class="host">—</div>
 
+  <!-- ページの作りで決まる設定。中身の実装によって必要な値が変わるので
+       ページ単位で覚える (同じホストでも別ページなら別の値になり得る) -->
+  <div class="section">このページの設定</div>
+
   <div class="row">
     <label for="mode">表示のしかた</label>
     <select id="mode">
@@ -28,13 +32,24 @@
     </select>
   </div>
 
+  <label class="check"><input type="checkbox" id="auto"> このページを開いたら自動で切り抜く</label>
+  <label class="check"><input type="checkbox" id="stretchFrames"> 内側のフレームも引き伸ばす</label>
+
   <div class="row buttons">
     <button id="cycle">次の候補 → (Alt+Shift+Z と同じ)</button>
   </div>
   <div id="cycleInfo" class="saved"></div>
 
-  <label class="check"><input type="checkbox" id="auto"> このサイトを開いたら自動で切り抜く</label>
-  <label class="check"><input type="checkbox" id="stretchFrames"> 内側のフレームも引き伸ばす</label>
+  <div class="row buttons">
+    <button id="pick">対象を手動で選ぶ</button>
+    <button id="reset" class="ghost">対象の記憶を消す</button>
+  </div>
+
+  <div id="saved" class="saved"></div>
+
+  <!-- 見た目の好みで決まる設定。ページによらないので全ページ共通 -->
+  <div class="section">全体の設定</div>
+
   <label class="check"><input type="checkbox" id="exitButton"> 画面隅に終了ボタン (×) を出す</label>
   <div class="row">
     <label for="exitCorner">終了ボタンの位置</label>
@@ -46,12 +61,6 @@
     </select>
   </div>
 
-  <div class="row buttons">
-    <button id="pick">対象を手動で選ぶ</button>
-    <button id="reset" class="ghost">対象の記憶を消す</button>
-  </div>
-
-  <div id="saved" class="saved"></div>
   <div id="syncInfo" class="saved"></div>
   <div class="row buttons" id="restoreRow" style="display:none">
     <button id="restore">この端末に残っている設定を復元</button>

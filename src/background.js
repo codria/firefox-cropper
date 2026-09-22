@@ -6,10 +6,19 @@
  */
 const api = globalThis.browser || globalThis.chrome;
 
-const DEFAULTS = {
-  mode: 'auto',          // auto | fill | fit
+/* 設定は性質で 2 つに分ける。
+     ページの作りで決まるもの → ページごと (同じホストでも別ページなら別の値)
+     見た目の好みで決まるもの → 全体
+   この区別が無いと、片方のページで必要だった値がもう片方を壊す。
+   実際 stretchFrames を全体設定にしていたため、あるページで OFF にすると
+   内側フレームの引き伸ばしが要る別ページまで効かなくなっていた。 */
+const PAGE_DEFAULTS = {
+  mode: 'auto',          // auto | fill | fit | bzoom | zoom
   strategy: 'auto',      // auto | first | largest … 対象の選び方
-  stretchFrames: true,   // 内側フレームも 100% に伸ばす
+  stretchFrames: true    // 内側フレームも 100% に伸ばす
+};
+
+const GLOBAL_DEFAULTS = {
   exitButton: true,      // 画面隅に小さな × を出す (既定ON)
   exitCorner: 'br'       // tr | tl | br | bl
 };
@@ -87,6 +96,17 @@ async function migrateToSync() {
    空の sync を見てしまい「設定が消えた」ように見える。 */
 /* 旧レイアウト (sites に全部入り) を 1 サイト 1 項目へ分割する。
    分割後も getSites() は両方を読むので、片方の端末が古いままでも壊れない。 */
+async function splitSettings() {
+  const all = await STORE.get('settings');
+  if (!all.settings) return;
+  const obj = {};
+  for (const k of Object.keys(GLOBAL_DEFAULTS)) {
+    if (all.settings[k] !== undefined) obj[GLOBAL_PREFIX + k] = all.settings[k];
+  }
+  if (Object.keys(obj).length) await STORE.set(obj);
+  await STORE.remove('settings');
+}
+
 async function splitSites() {
   const all = await STORE.get('sites');
   if (!all.sites || !Object.keys(all.sites).length) return;
@@ -98,6 +118,7 @@ async function splitSites() {
 
 const storeReady = migrateToSync()
   .then(splitSites)
+  .then(splitSettings)
   .catch((e) => { storeError = '移行: ' + e.message; });
 
 /* どちらの保存領域に何件入っているかを返す。
@@ -160,6 +181,7 @@ function siteKeyOf(url) {
 function hasConfig(site) {
   if (!site) return false;
   return !!(site.selector || site.auto || site.mode || site.strategy
+    || site.stretchFrames !== undefined
     || (site.sub && Object.keys(site.sub).length));
 }
 
@@ -168,10 +190,24 @@ async function siteFor(url) {
   return sites[siteKeyOf(url)] || sites[hostOf(url)] || {};
 }
 
+/* 全体設定も 1 設定 = 1 項目。項目数は少ないが、1 オブジェクトで書くと
+   「ダウンロード前の端末が書いて他の項目を既定値に戻す」経路が残る。
+   サイト設定で実際に起きた事故と同じ機序なので、同じ形に揃える。 */
+const GLOBAL_PREFIX = 'g:';
+
 async function getSettings() {
   await storeReady;
-  const got = await STORE.get('settings');
-  return Object.assign({}, DEFAULTS, got.settings || {});
+  const all = await STORE.get(null);
+  const out = Object.assign({}, GLOBAL_DEFAULTS, all.settings || {});  // 旧レイアウト
+  for (const k of Object.keys(GLOBAL_DEFAULTS)) {
+    if (GLOBAL_PREFIX + k in all) out[k] = all[GLOBAL_PREFIX + k];
+  }
+  return out;
+}
+
+// ページ設定は「保存値 → 既定値」の順で解決する
+function pageSetting(site, name) {
+  return site && site[name] !== undefined ? site[name] : PAGE_DEFAULTS[name];
 }
 
 /* サイト設定は「1 サイト = 1 項目」で持つ。
@@ -218,11 +254,11 @@ async function payloadFor(url) {
     ffc: true,
     cmd: 'apply',
     siteKey,
-    mode: site.mode || s.mode,
-    strategy: site.strategy || s.strategy,
+    mode: pageSetting(site, 'mode'),
+    strategy: pageSetting(site, 'strategy'),
+    stretchFrames: pageSetting(site, 'stretchFrames'),
     selector: site.selector || null,
     sub: site.sub || {},
-    stretchFrames: s.stretchFrames,
     exitButton: s.exitButton,
     exitCorner: s.exitCorner,
     launcher: hasConfig(site)      // OFF に戻した時も起動ボタンを残すため
@@ -490,10 +526,12 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
       return undefined;
 
     case 'popup:setSettings': {
-      const s = Object.assign(await getSettings(), msg.patch);
-      await storeSet({ settings: s });
+      // 変更した項目だけを書く。他の項目には触れない
+      const obj = {};
+      for (const k of Object.keys(msg.patch || {})) obj[GLOBAL_PREFIX + k] = msg.patch[k];
+      await storeSet(obj);
       if (msg.tab) await reapply(msg.tab.id, msg.tab.url);
-      return { ffc: true, settings: s };
+      return { ffc: true, settings: await getSettings() };
     }
 
     case 'popup:setSite':
@@ -510,6 +548,7 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
         return {
           key: k, current: k === cur,
           mode: v.mode || null, strategy: v.strategy || null,
+          stretchFrames: v.stretchFrames,
           auto: !!v.auto, selector: v.selector || null,
           subCount: v.sub ? Object.keys(v.sub).length : 0
         };
@@ -540,7 +579,11 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
         const a = local.sites[k] || {}, b = cur.sites[k] || {};
         merged[k] = Object.keys(a).length >= Object.keys(b).length ? a : b;
       }
-      const obj = { settings: Object.assign({}, local.settings || {}, cur.settings || {}) };
+      const obj = {};
+      const gs = Object.assign({}, local.settings || {}, cur.settings || {});
+      for (const k of Object.keys(GLOBAL_DEFAULTS)) {
+        if (gs[k] !== undefined) obj[GLOBAL_PREFIX + k] = gs[k];
+      }
       for (const k of Object.keys(merged)) obj[SITE_PREFIX + k] = merged[k];
       await storeSet(obj);
       return { ffc: true, restored: Object.keys(merged).length };

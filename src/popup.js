@@ -11,10 +11,12 @@ function paint(st) {
   $('toggle').textContent = on ? '切り抜きを解除' : '切り抜き ON';
   $('toggle').classList.toggle('on', on);
   $('host').textContent = st.host || '(このページでは使えません)';
-  $('mode').value = (st.site && st.site.mode) || st.settings.mode;
-  $('strategy').value = (st.site && st.site.strategy) || st.settings.strategy || 'auto';
-  $('auto').checked = !!(st.site && st.site.auto);
-  $('stretchFrames').checked = st.settings.stretchFrames !== false;
+  // ページ設定は site から、全体設定は settings から読む
+  const site = st.site || {};
+  $('mode').value = site.mode || 'auto';
+  $('strategy').value = site.strategy || 'auto';
+  $('auto').checked = !!site.auto;
+  $('stretchFrames').checked = site.stretchFrames !== false;
   $('exitButton').checked = st.settings.exitButton !== false;
   $('exitCorner').value = st.settings.exitCorner || 'br';
   $('saved').textContent = st.site && st.site.selector
@@ -187,6 +189,7 @@ async function loadSites() {
     if (r.auto) bits.push('自動適用');
     if (r.mode) bits.push('表示=' + r.mode);
     if (r.strategy && r.strategy !== 'auto') bits.push('選び方=' + r.strategy);
+    if (r.stretchFrames === false) bits.push('内側フレーム=OFF');
     if (r.selector) bits.push('対象=' + r.selector);
     if (r.subCount) bits.push('内側フレーム ' + r.subCount + '件');
     d.textContent = bits.length ? bits.join(' / ') : '(設定なし)';
@@ -227,17 +230,19 @@ async function init() {
     await bg('popup:clearSelector'); await refresh();
     if ($('siteBox').open) await loadSites();
   });
+  // --- ここから「このページの設定」。保存先は popup:setSite ---
   $('mode').addEventListener('change', async (e) => {
     await bg('popup:setSite', { patch: { mode: e.target.value } });
-    await bg('popup:setSettings', { patch: { mode: e.target.value } });
     await refresh();
   });
   $('auto').addEventListener('change', async (e) => {
     await bg('popup:setSite', { patch: { auto: e.target.checked } });
   });
   $('stretchFrames').addEventListener('change', async (e) => {
-    await bg('popup:setSettings', { patch: { stretchFrames: e.target.checked } });
+    await bg('popup:setSite', { patch: { stretchFrames: e.target.checked } });
+    await refresh();
   });
+  // --- ここから「全体の設定」。保存先は popup:setSettings ---
   $('exitButton').addEventListener('change', async (e) => {
     await bg('popup:setSettings', { patch: { exitButton: e.target.checked } });
   });
@@ -246,7 +251,6 @@ async function init() {
   });
   $('strategy').addEventListener('change', async (e) => {
     // 選び方を変えたら、記憶済みの対象は邪魔になるので一緒に捨てる
-    await bg('popup:setSettings', { patch: { strategy: e.target.value } });
     await bg('popup:setSite', { patch: { strategy: e.target.value, selector: null } });
     await refresh();
   });
