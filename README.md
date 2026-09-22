@@ -66,6 +66,22 @@ npx --yes web-ext lint --source-dir .
 設定 (対象セレクタ / 表示のしかた / 自動適用) は `storage.sync` に入るので、
 **Firefox アカウントにログインしていれば端末間で揃う** (下記参照)。
 
+> **既知の問題: 自動更新が動いていない。**
+> 新しいバージョンを出しても Firefox が拾わず、手動インストールが要る。
+> 以下は実測で潰した:
+> `update_url` は 0.2.0 以降すべての版に入っている /
+> `updates.json` は到達可能で JSON として妥当、バージョンも installed より大きい /
+> `.xpi` は `application/x-xpinstall` で配信され署名済み・ID も一致。
+>
+> 残る差分は `updates.json` が `text/plain` で配信されていること
+> (`raw.githubusercontent.com` の仕様。Mozilla は `application/json` を求めている)。
+> 原因として最有力だが未確定。直すなら `update_url` を
+> `https://cdn.jsdelivr.net/gh/codria/firefox-cropper@main/updates.json` に向ける
+> (jsDelivr は `application/json` で配信する。実測済み)。
+> ただし jsDelivr はブランチ指定で 12 時間ほどキャッシュするので、
+> リリース直後は古い情報が返り得る (パージ API がある)。
+> GitHub Releases のアセットは `application/octet-stream` になるので使えない (実測済み)。
+
 #### リリース手順
 
 ```bash
