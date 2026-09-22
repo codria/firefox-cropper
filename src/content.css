@@ -1,0 +1,268 @@
+/* ===== Frame Cropper : content styles =====
+   すべてクラス / 自前IDにのみ作用するので、無効時はページに一切影響しない。 */
+
+/* 対象以外を覆い隠す黒幕。<html> 直下に置くので body の transform 等の影響を受けない */
+#ffc-backdrop {
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: #000 !important;
+  z-index: 2147483646 !important;
+  pointer-events: none !important;
+}
+
+html.ffc-active,
+html.ffc-active > body {
+  overflow: hidden !important;
+}
+
+/* 祖先の無力化。2 つの別problemを同時に潰している:
+   (1) 基準枠 (containing block) : transform/filter/contain/perspective が付いた祖先が
+       あると position:fixed がビューポート基準にならない → none にする
+   (2) 重ね順 (stacking context) : opacity<1 / isolation / mix-blend-mode を持つ祖先は
+       独自の重ね順を作り、その中の z-index は外に効かない → 解除し、
+       位置指定済みの祖先は最前面へ持ち上げて黒幕より上に出す */
+.ffc-ancestor {
+  transform: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  perspective: none !important;
+  will-change: auto !important;
+  contain: none !important;
+  content-visibility: visible !important;
+  clip-path: none !important;
+  mask: none !important;
+  isolation: auto !important;
+  mix-blend-mode: normal !important;
+  opacity: 1 !important;
+  z-index: 2147483647 !important;
+}
+
+/* 対象が iframe (= それ自体が完結した1ページ) の時だけ、祖先の兄弟要素を消す。
+   黒幕で覆うだけだと「極端に大きい z-index を持つ広告」が上に出る余地が残るため、
+   そもそも描画させない。セレクタ規則なので、SPA が後から要素を足しても自動で効く。
+   canvas が対象の時は行わない — 中身の HTML製UI が canvas の兄弟にあることが多く、
+   消すとUIごと飛ぶため。 */
+html.ffc-hide-siblings .ffc-ancestor > *:not(.ffc-ancestor):not(.ffc-target):not([id^="ffc-"]),
+html.ffc-hide-siblings.ffc-ancestor > *:not(.ffc-ancestor):not(.ffc-target):not([id^="ffc-"]) {
+  display: none !important;
+}
+
+/* 切り抜き対象に共通の下ごしらえ。
+   大きさの指定はここに置かない — モードによって「広げる/比率維持/拡大/無変更」と
+   変わるため。サイズを触らない bzoom で上書きを剥がせるようにしておく。 */
+.ffc-target {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  /* 対象の周囲を塗りつぶす。影は「要素自身の描画」なので対象と同じ重ね順に入り、
+     DOM を一切増やさずに『対象より下・他より上』の黒地を作れる。
+     レターボックスの余白から後ろのページが透けるのを、これ 1 行で止める。
+     (対象の隣に黒幕ノードを挿す手もあるが、React 製 SPA が再描画で
+      見知らぬ子ノードを巻き込む危険があるので採らない) */
+  box-shadow: 0 0 0 100vmax #000 !important;
+  clip-path: none !important;
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  z-index: 2147483647 !important;
+}
+
+/* ビューポート全面へ (fill)。bzoom 以外の既定の大きさ指定。 */
+.ffc-target:not(.ffc-natural) {
+  left: 0 !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: none !important;
+  background: #000 !important;
+}
+
+/* 縦横比を保ったまま最大化 (レターボックス)。--ffc-ar は JS が実測値を入れる */
+.ffc-target.ffc-fit {
+  --ffc-ar: 1.7777;
+  left: 50% !important;
+  top: 50% !important;
+  width: min(100vw, calc(100vh * var(--ffc-ar))) !important;
+  height: min(100vh, calc(100vw / var(--ffc-ar))) !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+/* 内側フレーム (ゲートウェイ → コンテンツ本体) の土台を 100% に */
+html.ffc-fill-root,
+html.ffc-fill-root > body {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background: #000 !important;
+}
+
+/* ===== 要素ピッカー ===== */
+#ffc-catcher {
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 2147483647 !important;
+  background: transparent !important;
+  cursor: crosshair !important;
+}
+
+#ffc-highlight {
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  margin: 0 !important;
+  z-index: 2147483646 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  border: 2px solid #4da3ff !important;
+  background: rgba(77, 163, 255, 0.18) !important;
+}
+
+#ffc-hint {
+  position: fixed !important;
+  left: 50% !important;
+  bottom: 28px !important;
+  transform: translateX(-50%) !important;
+  z-index: 2147483647 !important;
+  pointer-events: none !important;
+  max-width: 90vw !important;
+  box-sizing: border-box !important;
+  font: 13px/1.6 system-ui, "Segoe UI", sans-serif !important;
+  color: #fff !important;
+  background: rgba(18, 18, 22, 0.94) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  padding: 8px 14px !important;
+  border-radius: 8px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* 終了ボタン。既定で表示する (ショートカットを覚えなくても抜けられるように)。
+   置き場所は中身のUIと重なるため四隅から選べる。
+
+   × は文字ではなく SVG で描く。文字の '×' は字形の中心も上下位置もフォント依存で、
+   円の中心とは一致しない (line-height で合わせても環境が変わればまたズレる)。
+   背景画像なら background-position: center が効いて常に中心に来る。
+   box-sizing: border-box と border-radius: 50% で、枠線 1px 込みでも真円になる。 */
+#ffc-exit {
+  position: fixed !important;
+  box-sizing: border-box !important;
+  width: 28px !important;
+  height: 28px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  z-index: 2147483647 !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
+  background-color: rgba(0, 0, 0, 0.55) !important;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%2012%2012%27%3E%3Cpath%20d=%27M2.5%202.5L9.5%209.5M9.5%202.5L2.5%209.5%27%20stroke=%27white%27%20stroke-width=%271.7%27%20stroke-linecap=%27round%27/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: center center !important;
+  background-size: 12px 12px !important;
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  border-radius: 50% !important;
+  cursor: pointer !important;
+  opacity: 0.12 !important;
+  transition: opacity 0.15s !important;
+}
+#ffc-exit:hover {
+  opacity: 1 !important;
+}
+/* OFF の時に出す起動ボタン。設定済みのサイトでだけ表示する。
+   ショートカットを覚えなくても ON / OFF が往復できるように、同じ位置で
+   アイコンだけ「四隅の括弧 (開始)」と「× (終了)」を入れ替える。 */
+#ffc-exit.ffc-launch {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%2012%2012%27%3E%3Cpath%20d=%27M1.6%204.4V1.6H4.4M7.6%201.6H10.4V4.4M10.4%207.6V10.4H7.6M4.4%2010.4H1.6V7.6%27%20stroke=%27white%27%20stroke-width=%271.4%27%20fill=%27none%27%20stroke-linecap=%27round%27%20stroke-linejoin=%27round%27/%3E%3C/svg%3E") !important;
+}
+
+#ffc-exit.ffc-tr { top: 6px !important; right: 6px !important; }
+#ffc-exit.ffc-tl { top: 6px !important; left: 6px !important; }
+#ffc-exit.ffc-br { bottom: 6px !important; right: 6px !important; }
+#ffc-exit.ffc-bl { bottom: 6px !important; left: 6px !important; }
+
+/* 候補送りの現在地表示。切り抜いた枠の上に出るよう最前面に置く */
+#ffc-toast {
+  position: fixed !important;
+  left: 50% !important;
+  top: 14px !important;
+  transform: translateX(-50%) !important;
+  z-index: 2147483647 !important;
+  pointer-events: none !important;
+  max-width: 90vw !important;
+  box-sizing: border-box !important;
+  font: 12px/1.5 ui-monospace, Consolas, monospace !important;
+  color: #fff !important;
+  background: rgba(18, 18, 22, 0.88) !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  border-radius: 7px !important;
+  padding: 6px 12px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  opacity: 1 !important;
+  transition: opacity 0.3s !important;
+}
+#ffc-toast.ffc-fade { opacity: 0 !important; }
+
+/* 拡大モード。iframe / canvas と違い、div などの通常要素は箱を広げても
+   中のレイアウトは元のままなので、実際に大きくするには拡大変換が要る。
+   元の実寸 (--ffc-w / --ffc-h) を保ったまま scale するので、
+   中の座標系は壊れない。CSS 変換は当たり判定にも適用されるためクリック位置もずれない。
+   倍率と位置は JS が実測して --ffc-k / --ffc-x / --ffc-y に入れる。 */
+.ffc-target.ffc-zoom {
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: calc(var(--ffc-w) * 1px) !important;
+  height: calc(var(--ffc-h) * 1px) !important;
+  transform: translate(calc(var(--ffc-x) * 1px), calc(var(--ffc-y) * 1px)) scale(var(--ffc-k)) !important;
+  transform-origin: 0 0 !important;
+  background: transparent !important;
+}
+
+/* ブラウザズーム方式 (bzoom)。
+   要素の大きさには一切触らず、中央に置くだけ。拡大は tabs.setZoom に任せる。
+
+   幅高さを触らないのが肝。transform: scale() だと getBoundingClientRect() は
+   拡大後、clientWidth は拡大前の値を返すため、両者を使う中身の座標計算が
+   倍率ぶんズレる。CSS の幅を変える fit も同じで、canvas の width 属性 (1280) と
+   CSS 幅 (1801) が食い違い、補正を入れていない中身では右端で 521px ズレる。
+   ブラウザズームは CSS ピクセルの定義自体を変えるので、どの値も同じ単位のまま
+   = 中身の計算が一切崩れない。
+   さらに、中身が自分で canvas の大きさを変える作りでも邪魔をしない。 */
+.ffc-target.ffc-natural {
+  left: 50% !important;
+  top: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%) !important;
+  transform-origin: 50% 50% !important;
+  background: transparent !important;
+}

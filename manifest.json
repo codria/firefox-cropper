@@ -1,0 +1,60 @@
+{
+  "manifest_version": 2,
+  "name": "Frame Cropper",
+  "version": "0.1.0",
+  "description": "ページ内の埋め込みコンテンツ (iframe / canvas) だけをウィンドウいっぱいに表示する",
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "frame-cropper@sleep.local",
+      "strict_min_version": "115.0"
+    }
+  },
+
+  "permissions": [
+    "storage",
+    "tabs",
+    "<all_urls>"
+  ],
+
+  "background": {
+    "scripts": ["src/background.js"],
+    "persistent": true
+  },
+
+  "browser_action": {
+    "default_title": "Frame Cropper",
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "48": "icons/icon.svg",
+      "96": "icons/icon.svg"
+    }
+  },
+
+  "icons": {
+    "48": "icons/icon.svg",
+    "96": "icons/icon.svg"
+  },
+
+  "commands": {
+    "toggle-crop": {
+      "suggested_key": { "default": "Alt+Shift+Z" },
+      "description": "切り抜き: ON(候補1) → 候補2 → … → OFF"
+    },
+    "pick-element": {
+      "suggested_key": { "default": "Alt+Shift+X" },
+      "description": "切り抜く要素を手動で選ぶ"
+    }
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_start",
+      "js": ["src/content.js"],
+      "css": ["src/content.css"]
+    }
+  ]
+}

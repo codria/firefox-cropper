@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Frame Cropper fixture</title>
+<!-- 拡張本体と同じスタイルを読み込む -->
+<link rel="stylesheet" href="../src/content.css">
+<style>
+  body { margin: 0; font: 13px system-ui, sans-serif; background: #eee; }
+  /* 実サイトでよくある罠を再現する */
+  .sticky-header { position: sticky; top: 0; z-index: 99999; background: #c33; color: #fff; padding: 10px; }
+  .cb-trap       { transform: translateZ(0); }                       /* 基準枠を奪う祖先 */
+  .sc-trap       { opacity: 0.999; position: relative; z-index: 3; } /* 重ね順を作る祖先 */
+  .deco          { padding: 30px; background: #333; }
+  .game          { display: block; width: 640px; height: 360px; border: 0; margin: 0 auto; }
+  .overlay-ad    { position: fixed; left: 0; bottom: 0; width: 100%; height: 120px;
+                   background: #fa0; z-index: 2147483000; }
+</style>
+</head>
+<body>
+  <div class="sticky-header">サイトのヘッダー (sticky, z-index 99999)</div>
+  <div class="cb-trap">
+    <div class="sc-trap">
+      <div class="deco">
+        <iframe class="game" id="game_frame"></iframe>
+      </div>
+    </div>
+  </div>
+  <div style="height: 1200px; padding: 20px;">下に伸びるページ本文 (バナー相当)</div>
+  <div class="overlay-ad">超高 z-index の固定バナー (2147483000)</div>
+
+<script>
+/* 入れ子フレームは srcdoc を JS で組み立てる (HTML に直書きすると引用符の
+   エスケープが三重になって読めなくなるため)。
+
+   最深フレームは今回の不具合を再現する形にしてある:
+   - body に背景を置かない  → 描かれていない領域は透明で、親フレームが透ける
+   - canvas の「兄弟」に可視要素 (お知らせ欄相当) がある
+   canvas が対象の時は兄弟を display:none にしない設計なので、黒幕が無いと
+   この2つがそのまま見えてしまう。 */
+const gameDoc = `<style>
+    html, body { margin: 0; height: 100%; }            /* 背景色はあえて付けない */
+    canvas { display: block; background: #2a6; }
+    .news  { position: absolute; left: 0; bottom: 0; width: 100%; height: 160px;
+             background: #fff; color: #000; padding: 8px; box-sizing: border-box; }
+  </style>
+  <canvas id="stage" width="960" height="540"></canvas>
+  <div class="news" id="news">お知らせ欄 (canvas の兄弟。黒幕が無いとレターボックスの余白から見える)</div>`;
+
+const midDoc = `<style>
+    html, body { margin: 0; height: 100%; }
+    .frame-deco { height: 40px; background: #ddd; color: #000; }
+    iframe { display: block; width: 480px; height: 270px; border: 0; margin: 20px auto; }
+  </style>
+  <div class="frame-deco">対象の枠の装飾 (中間フレーム側)</div>
+  <iframe id="inner" srcdoc="${gameDoc.replace(/"/g, '&quot;')}"></iframe>`;
+
+document.getElementById('game_frame').srcdoc = midDoc;
+</script>
+</body>
+</html>

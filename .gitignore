@@ -1,0 +1,14 @@
+# web-ext sign / build の生成物
+web-ext-artifacts/
+*.xpi
+*.zip
+
+# tools/fixture.html から CSS を埋め込んで生成する検証用ファイル
+tools/*.built.html
+
+node_modules/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

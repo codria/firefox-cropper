@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <button id="toggle" class="toggle">切り抜き ON</button>
+  <div id="host" class="host">—</div>
+
+  <div class="row">
+    <label for="mode">表示のしかた</label>
+    <select id="mode">
+      <option value="auto">自動 (iframe=全面 / canvas=比率維持 / その他=ズーム)</option>
+      <option value="fill">全面に引き伸ばす</option>
+      <option value="fit">縦横比を保って最大化 (レターボックス)</option>
+      <option value="bzoom">ブラウザのズームで拡大 (座標ズレなし)</option>
+      <option value="zoom">拡大変換 (transform。座標がズレる場合あり)</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label for="strategy">対象の選び方</label>
+    <select id="strategy">
+      <option value="auto">自動 (大きさ + 手掛かりのスコア)</option>
+      <option value="first">DOM で最初の枠</option>
+      <option value="largest">面積が最大の枠</option>
+    </select>
+  </div>
+
+  <div class="row buttons">
+    <button id="cycle">次の候補 → (Alt+Shift+Z と同じ)</button>
+  </div>
+  <div id="cycleInfo" class="saved"></div>
+
+  <label class="check"><input type="checkbox" id="auto"> このサイトを開いたら自動で切り抜く</label>
+  <label class="check"><input type="checkbox" id="stretchFrames"> 内側のフレームも引き伸ばす</label>
+  <label class="check"><input type="checkbox" id="exitButton"> 画面隅に終了ボタン (×) を出す</label>
+  <div class="row">
+    <label for="exitCorner">終了ボタンの位置</label>
+    <select id="exitCorner">
+      <option value="br">右下</option>
+      <option value="bl">左下</option>
+      <option value="tr">右上</option>
+      <option value="tl">左上</option>
+    </select>
+  </div>
+
+  <div class="row buttons">
+    <button id="pick">対象を手動で選ぶ</button>
+    <button id="reset" class="ghost">対象の記憶を消す</button>
+  </div>
+
+  <div id="saved" class="saved"></div>
+
+  <details id="siteBox">
+    <summary>保存済みサイト <span id="siteCount"></span></summary>
+    <div id="sites" class="cands">読み込み中…</div>
+  </details>
+
+  <details id="candBox">
+    <summary>検出候補の一覧 <span id="candCount"></span></summary>
+    <div id="cands" class="cands">読み込み中…</div>
+    <button id="copy" class="ghost wide">一覧を JSON でコピー</button>
+  </details>
+
+  <div class="foot">
+    <b>Alt+Shift+Z</b> を押すたび 候補1 → 候補2 → … → OFF<br>
+    Alt+Shift+X: 対象をクリックで選ぶ &nbsp;·&nbsp; Esc: 解除
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# Windows の core.autocrlf に関係なく、リポジトリにも作業ツリーにも LF で置く。
+# 拡張機能のファイルは改行コードに意味がなく、環境差で全行が差分になるのを防ぐ。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.xpi binary
