@@ -29,15 +29,32 @@
 
 ### B. 常用する (署名して恒久インストール)
 
-Firefox 製品版は未署名の拡張を入れられない。自分用なら AMO の **unlisted 署名**が使える。
+**一時的なアドオンは Firefox を再起動するたびに消える**ので、常用するならこちら。
+製品版 Firefox は未署名の拡張を入れられないが、自分用なら AMO の **unlisted 署名**が使える。
+無料で、AMO のカタログには公開されず、審査は自動検証のみ (数秒〜数分)。
+
+1. https://addons.mozilla.org/developers/addon/api/key/ で API 資格情報を発行
+2. 署名する:
 
 ```bash
-npm install -g web-ext
-web-ext sign --channel=unlisted --api-key=<JWT issuer> --api-secret=<JWT secret>
+npx --yes web-ext sign --channel=unlisted --api-key=<JWT issuer> --api-secret=<JWT secret>
 ```
 
-API キーは https://addons.mozilla.org/developers/addon/api/key/ で発行。
-生成された `web-ext-artifacts/*.xpi` を `about:addons` にドラッグすれば恒久的に入る。
+3. できた `web-ext-artifacts/*.xpi` を `about:addons` にドラッグする
+
+同梱するファイルは [web-ext-config.cjs](web-ext-config.cjs) で絞っている
+(`tools/` と README は拡張機能の動作に不要。加えて `tools/fixture.html` は
+インライン `<script>` を持つため、同梱すると CSP 関連の警告が出る)。
+
+事前に検証だけしたい場合:
+
+```bash
+npx --yes web-ext lint --source-dir .
+```
+
+**errors が 0 なら署名は通る** (warnings はブロックしない)。
+現状は Firefox for Android の互換性に関する warning が 1 件出るが、
+デスクトップ専用のこのツールには影響しない。
 
 ### C. 署名を回避する (Developer Edition / Nightly / ESR のみ)
 
