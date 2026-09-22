@@ -423,12 +423,28 @@
     for (let p = el.parentElement; p; p = p.parentElement) p.classList.add('ffc-ancestor');
     // 内側フレームで「対象が決まってから土台を触る」経路の分
     if (!IS_TOP) document.documentElement.classList.add('ffc-fill-root', 'ffc-active');
+    liftOverlays();
     if (IS_TOP && pendingAnnounce) { pendingAnnounce = false; announce(el); }
   }
 
   /* 対象が決まるまでの間だけ使う黒幕 (<html> 直下)。
      対象が決まった後の「周囲の塗りつぶし」は .ffc-target の box-shadow が担う。
      <html> の子として足すので、サイトのコンポーネントツリーには触れない。 */
+  /* 自前の重ね合わせ要素を <html> の末尾へ移す。
+     document_start (自動切り抜き) では <body> がまだ無いので、そこに差し込むと
+     後から追加された <body> より前に残る。終了ボタンと対象は z-index が同値で、
+     同値のときは DOM 順で後にある方が上に来るため、そのままだと
+     対象が終了ボタンを覆って押せなくなる (実測で確認)。
+     黒幕は z-index が 1 つ下なので、順序に関係なく対象より下に来る。 */
+  function liftOverlays() {
+    const de = document.documentElement;
+    if (!de) return;
+    for (const id of ['ffc-backdrop', 'ffc-exit', 'ffc-toast', 'ffc-catcher', 'ffc-hint']) {
+      const el = document.getElementById(id);
+      if (el && el.parentElement === de && el.nextSibling) de.appendChild(el);
+    }
+  }
+
   function backdrop(on) {
     const d = document.getElementById('ffc-backdrop');
     if (on) {
@@ -474,6 +490,7 @@
       }
     }, true);
     document.documentElement.appendChild(n);
+    liftOverlays();
   }
 
   // 解除後も、設定済みサイトなら起動ボタンを出しておく
