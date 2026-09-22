@@ -21,8 +21,11 @@ Mozilla の署名が付いているので、どの Firefox でもそのまま入
 配布者のアカウントに紐づかない)。新しい版が出れば自動で更新される。
 
 必要な環境は **Firefox 140 以降のデスクトップ版**。
-Firefox for Android は `storage.sync` を同期せず、ブラウザズームによる拡大も
-前提にしづらいため対象外。
+Android 版は動作確認していない。MDN の
+[storage.sync](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/storage/sync)
+は「Firefox for Android はこのデータをアカウントと同期しない」と記載しており
+([Firefox bug 1625257](https://bugzilla.mozilla.org/show_bug.cgi?id=1625257))、
+ブラウザズームによる拡大も前提にしづらい。
 
 ---
 
