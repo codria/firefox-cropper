@@ -498,11 +498,33 @@
     cornerButton(state.exitButton && state.launcher ? 'launch' : null);
   }
 
-  // 中身に「窓の大きさが変わった」と伝える。起動済みのエンジンを再レイアウトさせる用。
+  /* 中身に「窓の大きさが変わった」と伝える。起動済みのエンジンを再レイアウトさせる用。
+
+     中身がいつ寸法を読むか分からないので数回に分けて叩くが、
+     毎回無条件に投げると、寸法が変わっていなくてもそのたびに再レイアウトが走り、
+     切り抜いた直後に画面が数回揺れる。
+     そこで「前回通知した寸法と違う時だけ」投げる。レイアウトが落ち着いていれば
+     1 回で済み、まだ動いている間だけ追加で通知される。 */
+  let lastKick = '';
+
+  function sizeStamp() {
+    let t = '';
+    if (target) {
+      const r = target.getBoundingClientRect();
+      t = ':' + Math.round(r.width) + 'x' + Math.round(r.height);
+    }
+    return window.innerWidth + 'x' + window.innerHeight + t;
+  }
+
   function kickResize() {
-    // 起動直後だけ。中身の初期化タイミングが読めないので数回に分けて叩く
     for (const d of [0, 150, 500, 1200]) {
-      setTimeout(() => { fireResize(); if (IS_TOP) relayDown(); }, d);
+      setTimeout(() => {
+        const now = sizeStamp();
+        if (now === lastKick) return;   // 寸法が変わっていないなら黙る
+        lastKick = now;
+        fireResize();
+        if (IS_TOP) relayDown();
+      }, d);
     }
   }
 
@@ -640,6 +662,7 @@
 
   function deactivate() {
     lastSig = '';
+    lastKick = '';
     stopWaiting();
     releaseZoom();
     clearMarks();
