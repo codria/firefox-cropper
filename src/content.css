@@ -168,7 +168,8 @@ html.ffc-fill-root > body {
    円の中心とは一致しない (line-height で合わせても環境が変わればまたズレる)。
    背景画像なら background-position: center が効いて常に中心に来る。
    box-sizing: border-box と border-radius: 50% で、枠線 1px 込みでも真円になる。 */
-#ffc-exit {
+#ffc-exit,
+#ffc-shot {
   position: fixed !important;
   box-sizing: border-box !important;
   width: 28px !important;
@@ -190,7 +191,8 @@ html.ffc-fill-root > body {
   opacity: 0.12 !important;
   transition: opacity 0.15s !important;
 }
-#ffc-exit:hover {
+#ffc-exit:hover,
+#ffc-shot:hover {
   opacity: 1 !important;
 }
 /* OFF の時に出す起動ボタン。設定済みのサイトでだけ表示する。
@@ -200,10 +202,30 @@ html.ffc-fill-root > body {
   background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%2012%2012%27%3E%3Cpath%20d=%27M1.6%204.4V1.6H4.4M7.6%201.6H10.4V4.4M10.4%207.6V10.4H7.6M4.4%2010.4H1.6V7.6%27%20stroke=%27white%27%20stroke-width=%271.4%27%20fill=%27none%27%20stroke-linecap=%27round%27%20stroke-linejoin=%27round%27/%3E%3C/svg%3E") !important;
 }
 
+/* スクリーンショットのボタン。終了ボタンの隣に置く。
+   画面の端に寄っている側と反対向きに 34px ずらして並べる。 */
+#ffc-shot {
+  background-size: 15px 15px !important;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%2016%2016%27%3E%3Cg%20fill=%27none%27%20stroke=%27white%27%20stroke-width=%271.3%27%20stroke-linejoin=%27round%27%3E%3Cpath%20d=%27M1.6%205.4h2.6l1.1-1.6h5.4l1.1%201.6h2.6v7.2H1.6z%27/%3E%3Ccircle%20cx=%278%27%20cy=%279%27%20r=%272.4%27/%3E%3C/g%3E%3C/svg%3E") !important;
+}
+
 #ffc-exit.ffc-tr { top: 6px !important; right: 6px !important; }
 #ffc-exit.ffc-tl { top: 6px !important; left: 6px !important; }
 #ffc-exit.ffc-br { bottom: 6px !important; right: 6px !important; }
 #ffc-exit.ffc-bl { bottom: 6px !important; left: 6px !important; }
+
+#ffc-shot.ffc-tr { top: 6px !important; right: 40px !important; }
+#ffc-shot.ffc-tl { top: 6px !important; left: 40px !important; }
+#ffc-shot.ffc-br { bottom: 6px !important; right: 40px !important; }
+#ffc-shot.ffc-bl { bottom: 6px !important; left: 40px !important; }
+
+/* 撮影の瞬間だけ自前の UI を隠す。出したまま撮ると写り込む。
+   display ではなく visibility にするのは、レイアウトを動かさないため。 */
+html.ffc-shooting #ffc-exit,
+html.ffc-shooting #ffc-shot,
+html.ffc-shooting #ffc-toast {
+  visibility: hidden !important;
+}
 
 /* 候補送りの現在地表示。切り抜いた枠の上に出るよう最前面に置く */
 #ffc-toast {

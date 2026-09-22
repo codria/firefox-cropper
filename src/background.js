@@ -41,20 +41,78 @@ const savedZoom = new Map();
    原因が追えないので、必ず残してパネルに出す。 */
 const zoomLog = new Map();
 
-async function restoreZoom(tabId) {
-  if (!savedZoom.has(tabId)) return;
-  const z = savedZoom.get(tabId);
+/* ズームはサイト単位で記録されるため、Firefox を再起動しても残る。
+   その時こちらは何も覚えていないので、元の倍率をディスクにも控えておく。
+   端末固有の情報なので local に置く (sync すると他端末のズームを壊す)。 */
+async function rememberZoom(url, zoom) {
+  const origin = originOf(url);
+  if (!origin) return;
+  try {
+    const got = await api.storage.local.get('zoomRestore');
+    const map = got.zoomRestore || {};
+    if (map[origin] === undefined) {
+      map[origin] = zoom;
+      await api.storage.local.set({ zoomRestore: map });
+    }
+  } catch (_) {}
+}
+
+async function forgetZoom(url) {
+  const origin = originOf(url);
+  if (!origin) return;
+  try {
+    const got = await api.storage.local.get('zoomRestore');
+    const map = got.zoomRestore || {};
+    if (map[origin] === undefined) return;
+    delete map[origin];
+    await api.storage.local.set({ zoomRestore: map });
+  } catch (_) {}
+}
+
+const originOf = (url) => { try { return new URL(url).origin; } catch (_) { return ''; } };
+
+async function restoreZoom(tabId, url) {
+  let z = savedZoom.get(tabId);
   savedZoom.delete(tabId);
-  /* 2 つを別々の try に分ける。ひとつの try にまとめると、
-     scope を戻すのに失敗した時点で肝心の倍率復元が実行されないまま
-     握りつぶされてしまう (ズームが掛かりっぱなしで残る)。 */
-  try { await api.tabs.setZoomSettings(tabId, { scope: 'per-origin' }); }
-  catch (e) { note(tabId, { at: stamp(), result: '復元: scope 戻し失敗 ' + e.message }); }
+  if (z === undefined) {
+    // 再起動を跨いだ場合。控えておいた倍率で戻す
+    try {
+      const got = await api.storage.local.get('zoomRestore');
+      z = (got.zoomRestore || {})[originOf(url)];
+    } catch (_) {}
+  }
+  if (z === undefined) return;
   try { await api.tabs.setZoom(tabId, z); note(tabId, { at: stamp(), result: '復元 → ' + z }); }
   catch (e) { note(tabId, { at: stamp(), error: '復元失敗: ' + e.message }); }
+  await forgetZoom(url);
 }
 
 function stamp() { return new Date().toISOString().slice(11, 19); }
+
+/* 撮った画像を対象の矩形で切り抜く。
+   captureVisibleTab は端末ピクセルで返すので、CSS ピクセルの矩形を
+   画像の幅 / ビューポートの幅 で換算する (ブラウザズームも倍率に含まれる)。
+   矩形が取れなければ無加工で返す — 何も保存されないより良い。 */
+function cropShot(dataUrl, rect, vw) {
+  return new Promise((resolve) => {
+    if (!rect || !vw || !(rect.w > 0) || !(rect.h > 0)) return resolve(dataUrl);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const k = img.width / vw;
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(rect.w * k));
+        c.height = Math.max(1, Math.round(rect.h * k));
+        c.getContext('2d').drawImage(
+          img, Math.round(rect.x * k), Math.round(rect.y * k), c.width, c.height,
+          0, 0, c.width, c.height);
+        resolve(c.toDataURL('image/png'));
+      } catch (_) { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
 
 function note(tabId, entry) {
   const hist = zoomLog.get(tabId) || [];
@@ -144,6 +202,21 @@ async function syncStatus() {
     error: storeError,
     syncCount: await count('sync'),
     localCount: await count('local'),
+  };
+}
+
+/* ブラウザズームの現況。パネルに常時出す。
+   候補一覧の中に畳んでいたら見つけてもらえなかった — 診断は
+   見える所に無いと使われない。 */
+async function zoomStatus(tabId) {
+  let now = null;
+  try { now = await api.tabs.getZoom(tabId); } catch (_) {}
+  const hist = zoomLog.get(tabId) || [];
+  const warn = hist.filter((h) => h.scopeWarn).pop();
+  return {
+    now: now == null ? null : Math.round(now * 100),
+    saved: savedZoom.has(tabId) ? Math.round(savedZoom.get(tabId) * 100) : null,
+    scopeWarn: warn ? warn.scopeWarn : null,
   };
 }
 
@@ -309,7 +382,7 @@ async function stepTab(tab) {
   if (res.picked.state === 'off') {
     activeTabs.delete(tab.id);
     send(tab.id, { ffc: true, cmd: 'clear' });   // 内側フレームも戻す
-    await restoreZoom(tab.id);                   // ブラウザズームを元に戻す
+    await restoreZoom(tab.id, tab.url);          // ブラウザズームを元に戻す
     badge(tab.id, false);
     return;
   }
@@ -321,10 +394,10 @@ async function stepTab(tab) {
   }
 }
 
-function deactivate(tabId) {
+function deactivate(tabId, url) {
   activeTabs.delete(tabId);
   send(tabId, { ffc: true, cmd: 'clear' });
-  restoreZoom(tabId);
+  restoreZoom(tabId, url);
   badge(tabId, false);
 }
 
@@ -412,11 +485,13 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
       let cur = 1;
       try { cur = await api.tabs.getZoom(tabId); } catch (e) { log.error = 'getZoom: ' + e.message; return undefined; }
       log.before = +cur.toFixed(3);
+      /* Firefox は scope: 'per-tab' を受け付けない (Unsupported zoom settings)。
+         つまりズームは必ずサイト単位で記録され、タブを閉じても残る。
+         こちらでできるのは「解除時と読み込み時に必ず元へ戻す」ことだけなので、
+         失敗する呼び出しは行わず、元の倍率を確実に控えることに集中する。 */
       if (!savedZoom.has(tabId)) {
         savedZoom.set(tabId, cur);
-        // per-tab にしておかないと、このサイトの既定ズームを書き換えてしまう
-        try { await api.tabs.setZoomSettings(tabId, { scope: 'per-tab' }); }
-        catch (e) { log.scopeWarn = e.message; }
+        rememberZoom(tab && tab.url, cur);
       }
       const baseW = msg.vw * cur, baseH = msg.vh * cur;
       let z = Math.min(baseW / msg.w, baseH / msg.h);
@@ -429,6 +504,11 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
          不感帯 2% ぶんの余白 (十数 px) は見た目に影響しない。 */
       z = Math.round(z * 100) / 100;
       log.want = z;
+      /* 上限・下限に張り付いた要求は適用しない。
+         対象の実寸がまだ決まっていない (canvas の既定 300x150 など) 時に
+         巨大な倍率が出る。実際に 5 倍が適用されて画面が壊れた。
+         正当な要求がこの端に来ることはまず無いので、弾く方が安全。 */
+      if (z >= 5 || z <= 0.3) { log.result = '却下 (倍率が上限/下限に張り付き)'; return undefined; }
       if (Math.abs(z - cur) < 0.02) { log.result = '変更不要 (不感帯 ±0.02 内)'; return undefined; }
       try {
         await api.tabs.setZoom(tabId, z);
@@ -440,13 +520,47 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
       return undefined;
     }
 
+    /* スクリーンショット。tabs.captureVisibleTab は表示領域をそのまま撮るので、
+       撮る前に自前の UI を隠し、撮った後に戻す。
+       切り抜く範囲は「対象の矩形」。中間フレームはすべて全面に広げてあるため、
+       最深フレームの座標がそのまま最上位の座標として使える。 */
+    case 'shot': {
+      if (tabId == null || !tab) return { ffc: true, error: 'タブが取れない' };
+      send(tabId, { ffc: true, cmd: 'shotPrepare', on: true });
+      await new Promise((r) => setTimeout(r, 80));   // 隠した状態が描画されるのを待つ
+
+      // 対象の矩形を全フレームから集め、iframe でない一番小さいものを採る
+      // (iframe は器なので、実際の描画面はその内側にある)
+      let best = null, top = null;
+      for (const fid of Array.from(new Set([0, ...(tabFrames.get(tabId) || [])]))) {
+        try {
+          const r = await api.tabs.sendMessage(tabId, { ffc: true, cmd: 'shotRect' }, { frameId: fid });
+          if (!r || !r.rect) continue;
+          if (r.isTop) top = r;
+          if (!r.isIframe && (!best || r.rect.w * r.rect.h < best.rect.w * best.rect.h)) best = r;
+        } catch (_) { /* 応答しないフレーム */ }
+      }
+
+      let shot = null, error = null;
+      try {
+        shot = await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      } catch (e) { error = e.message; }
+      send(tabId, { ffc: true, cmd: 'shotPrepare', on: false });
+      if (!shot) return { ffc: true, error: error || '撮影できなかった' };
+
+      const use = best || top;
+      const cropped = await cropShot(shot, use && use.rect, top && top.vw);
+      send(tabId, { ffc: true, cmd: 'shotSave', dataUrl: cropped }, { frameId: 0 });
+      return { ffc: true, ok: true };
+    }
+
     // 隅の起動ボタンから ON にする
     case 'launch':
       if (tabId != null && tab) await activate(tabId, tab.url, true);
       return undefined;
 
     case 'restoreZoom':
-      if (tabId != null) await restoreZoom(tabId);
+      if (tabId != null) await restoreZoom(tabId, (tab && tab.url) || sender.url);
       return undefined;
 
     // ページ内 (Esc / ×ボタン) から解除された
@@ -454,7 +568,7 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
       if (tabId != null) {
         activeTabs.delete(tabId);
         send(tabId, { ffc: true, cmd: 'clear' });
-        await restoreZoom(tabId);      // ここが抜けていて × / Esc だけ戻らなかった
+        await restoreZoom(tabId, (tab && tab.url) || sender.url);   // × / Esc 経由
         badge(tabId, false);
       }
       return undefined;
@@ -469,7 +583,8 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
         host,
         settings: await getSettings(),
         site: await siteFor(t.url),
-        sync: await syncStatus()
+        sync: await syncStatus(),
+        zoom: await zoomStatus(t.id)
       };
     }
 
@@ -628,14 +743,27 @@ api.tabs.onRemoved.addListener((tabId) => {
 
 // 別サイトへ移動したら状態を落とす (同一ホスト内の遷移は維持し、
 // content script 側の 'query' で自動的に貼り直される)
-api.tabs.onUpdated.addListener((tabId, info) => {
+api.tabs.onUpdated.addListener(async (tabId, info) => {
   if (info.status !== 'loading' || !info.url) return;
   tabFrames.delete(tabId);          // 読み込み直しで frameId は振り直される
   const cur = activeTabs.get(tabId);
-  if (!cur) return;
+  if (!cur) {
+    /* 切り抜いていないのにズームが残っている場合がある。
+       ブラウザ側のズームはタブ (またはサイト) に紐づいて保持されるため、
+       読み込み直してもこちらが設定した倍率が残り、
+       「切り抜いていないのに拡大されたページ」になってしまう。 */
+    await restoreZoom(tabId, info.url);
+    return;
+  }
   // 別の中身 (パスが違う) へ移ったら状態を落とす
-  if (siteKeyOf(info.url) !== cur.siteKey) deactivate(tabId);
-  else rebroadcast(tabId);
+  if (siteKeyOf(info.url) !== cur.siteKey) { deactivate(tabId, info.url); return; }
+
+  /* 同じページの読み込み直し。自動適用が付いていれば、どうせ読み込み後に
+     倍率を計算し直すので残したままにする (戻すと 100% を挟んでちらつく)。
+     付いていなければ、拡大されたまま素のページが出てしまうので戻す。 */
+  const site = await siteFor(info.url);
+  if (!(site && site.auto)) await restoreZoom(tabId, info.url);
+  rebroadcast(tabId);
 });
 
 api.tabs.onActivated.addListener(({ tabId }) => badge(tabId, activeTabs.has(tabId)));

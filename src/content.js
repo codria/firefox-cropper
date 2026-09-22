@@ -58,10 +58,27 @@
       el.getAttribute('title') || '', srcPart].join(' ');
   }
 
+  /* 寸法がまだ決まっていない canvas。width/height 属性が無い canvas は
+     HTML の既定である 300x150 になる。自動適用は document_start で走るため、
+     中身がサイズを決める前のこの値を掴んでしまうことがある。
+     掴むと比率 2:1 のまま拡大され、横長に表示される (実際に踏んだ)。 */
+  /* いつまでも待たないための猶予。canvas のサイズを CSS だけで決めて
+     width/height 属性を付けない作りだと、「準備中」が永久に真になって
+     一度も切り抜かれない。一定時間で諦めて、あるものを使う。 */
+  const UNSIZED_GRACE_MS = 3000;
+  let waitStarted = 0;
+
+  function isUnsizedCanvas(el) {
+    if (el.tagName !== 'CANVAS') return false;
+    if (el.hasAttribute('width') || el.hasAttribute('height')) return false;
+    return !waitStarted || (Date.now() - waitStarted) < UNSIZED_GRACE_MS;
+  }
+
   function scoreOf(el) {
     const r = rectOf(el);
     if (r.width < MIN_W || r.height < MIN_H) return 0;
     if (!isVisible(el)) return 0;
+    if (isUnsizedCanvas(el)) return 0;
     let host = '';
     try { if (el.src) host = new URL(el.src, location.href).hostname; } catch (_) { /* about:blank 等 */ }
     if (host && AD_HOST.test(host)) return 0;
@@ -212,12 +229,20 @@
 
   function resolveTarget() {
     if (state.selector) {
-      try {
-        const el = document.querySelector(state.selector);
-        // 手で指定した対象はスコアで弾かない。大きさと可視性だけ見る。
-        // (広告ホスト判定などでスコア 0 になる枠を手で選べなくなるのを防ぐ)
-        if (el && sizeScore(el) > 0) return el;
-      } catch (_) { /* 壊れたセレクタは無視して自動検出に落とす */ }
+      let el = null;
+      try { el = document.querySelector(state.selector); } catch (_) { /* 壊れたセレクタ */ }
+      if (el) {
+        /* 手で指定した対象はスコアで弾かない。大きさと可視性だけ見る
+           (広告ホスト判定などでスコア 0 になる枠を手で選べなくなるのを防ぐ)。
+
+           ただし、使えない時に「代わりに別の要素を掴む」ことはしない。
+           指定された対象が未初期化の canvas だった場合、代わりに掴んだ iframe が
+           兄弟要素を display:none にして canvas 自身を隠してしまい、
+           隠れたせいで二度と候補に戻れなくなる (実際に固まった)。
+           人が指した対象があるなら、準備できるまで待つのが正しい。 */
+        if (isUnsizedCanvas(el)) return null;
+        return sizeScore(el) > 0 ? el : null;
+      }
     }
     /* 「内側のフレームも引き伸ばす」が OFF の内側フレームは、
        人が指したものが実在する時だけ動く。自動検出に落ちると、
@@ -385,13 +410,23 @@
 
   // 中身が canvas の解像度を変えたら比率を取り直す (切替時の比率で固定されないように)
   let arObserver = null;
+  /* canvas の解像度は後から変わる。中身が起動時に自分で決めることが多く、
+     こちらが先に測っていると古い値が残る。origSize は一度きりの記録なので、
+     属性が変わったら測り直して当て直す。
+     これが無いと、掴んだ瞬間の寸法で固定されたまま直らない。 */
   function watchAspect(el) {
     if (arObserver) { arObserver.disconnect(); arObserver = null; }
     if (!el || el.tagName !== 'CANVAS') return;
     arObserver = new MutationObserver(() => {
-      if (target === el && el.classList.contains('ffc-fit')) {
-        el.style.setProperty('--ffc-ar', String(aspectOf(el)));
-      }
+      if (target !== el) return;
+      const w = el.width, h = el.height;
+      if (!(w > 0 && h > 0)) return;
+      origSize.set(el, { width: w, height: h, top: 0 });
+      const m = effectiveMode(el);
+      if (m === 'fit') el.style.setProperty('--ffc-ar', String(aspectOf(el)));
+      else if (m === 'zoom') updateZoom(el);
+      else if (m === 'bzoom') requestZoomFit(el, true);
+      kickResize();
     });
     arObserver.observe(el, { attributes: true, attributeFilter: ['width', 'height'] });
   }
@@ -439,9 +474,10 @@
   function liftOverlays() {
     const de = document.documentElement;
     if (!de) return;
-    for (const id of ['ffc-backdrop', 'ffc-exit', 'ffc-toast', 'ffc-catcher', 'ffc-hint']) {
-      const el = document.getElementById(id);
-      if (el && el.parentElement === de && el.nextSibling) de.appendChild(el);
+    /* 対象を id で列挙すると、要素を足した時に追加し忘れる (実際 ffc-shot で踏んだ)。
+       <html> 直下にある自前の要素を id の接頭辞で拾い、列挙をやめる。 */
+    for (const el of Array.from(de.children)) {
+      if (el.id && el.id.startsWith('ffc-') && el.nextSibling) de.appendChild(el);
     }
   }
 
@@ -493,9 +529,75 @@
     liftOverlays();
   }
 
+  /* スクリーンショットのボタン。切り抜き中だけ、終了ボタンの隣に出す。 */
+  function shotButton(on) {
+    if (!IS_TOP || !document.documentElement) return;
+    const b = document.getElementById('ffc-shot');
+    if (!on) { if (b) b.remove(); return; }
+    if (b) { b.className = 'ffc-' + (state.exitCorner || 'br'); return; }
+    const n = document.createElement('div');
+    n.id = 'ffc-shot';
+    n.className = 'ffc-' + (state.exitCorner || 'br');
+    n.title = '表示中の範囲を画像で保存';
+    n.setAttribute('role', 'button');
+    n.setAttribute('aria-label', '表示中の範囲を画像で保存');
+    n.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      api.runtime.sendMessage({ ffc: true, cmd: 'shot' })
+        .then((res) => { if (res && res.error) toast('撮影に失敗: ' + res.error); })
+        .catch(() => {});
+    }, true);
+    document.documentElement.appendChild(n);
+    liftOverlays();
+  }
+
+  /* 撮影の段取り。撮る直前に自前の UI を隠さないと写り込む。
+     visibility で隠すのは、レイアウトを動かさないため。 */
+  function shotPrepare(on) {
+    document.documentElement.classList.toggle('ffc-shooting', !!on);
+  }
+
+  /* 切り抜く範囲。中間フレームはすべて 100vw×100vh に広げてあるので、
+     最深フレームでの座標がそのまま最上位の座標になる。
+     これで入れ子を跨いだ座標変換が要らない。 */
+  function shotRect() {
+    if (!target) return { ffc: true, rect: null, isTop: IS_TOP };
+    const r = target.getBoundingClientRect();
+    return {
+      ffc: true, isTop: IS_TOP,
+      isIframe: target.tagName === 'IFRAME',
+      rect: { x: r.left, y: r.top, w: r.width, h: r.height },
+      vw: window.innerWidth, vh: window.innerHeight
+    };
+  }
+
+  /* 受け取った画像を保存する。downloads 権限は使わない —
+     自己ホストの拡張機能で権限を増やすと、更新のたびに各端末で
+     許可のし直しが要る (自動更新が止まる)。
+     Blob と <a download> なら追加権限なしで保存ダイアログが出せる。 */
+  function saveShot(dataUrl) {
+    const d = new Date();
+    const p2 = (n) => String(n).padStart(2, '0');
+    const name = 'frame-cropper-' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate())
+      + '-' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + '.png';
+    fetch(dataUrl).then((r) => r.blob()).then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.style.display = 'none';
+      document.documentElement.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      toast('保存: ' + name);
+    }).catch((e) => toast('保存に失敗: ' + e.message));
+  }
+
   // 解除後も、設定済みサイトなら起動ボタンを出しておく
   function idleButton() {
     cornerButton(state.exitButton && state.launcher ? 'launch' : null);
+    shotButton(false);   // 切り抜いていない時は撮る対象が無い
   }
 
   /* 中身に「窓の大きさが変わった」と伝える。起動済みのエンジンを再レイアウトさせる用。
@@ -612,6 +714,7 @@
     document.documentElement.classList.add('ffc-active');
     backdrop(true);                 // 対象が見つかる前に先に黒幕を出す (バナーを一瞬も見せない)
     cornerButton(state.exitButton ? 'exit' : null);
+    shotButton(state.exitButton);
     waitForTarget();
   }
 
@@ -632,6 +735,7 @@
 
   function waitForTarget(timeoutMs = 30000) {
     stopWaiting();
+    waitStarted = Date.now();
     const attempt = () => {
       if (!state.active) { stopWaiting(); return true; }
       const el = resolveTarget();
@@ -710,7 +814,7 @@
       stopWaiting();
       target = null;
       clearMarks();
-      if (IS_TOP) cornerButton(state.exitButton ? 'exit' : null);
+      if (IS_TOP) { cornerButton(state.exitButton ? 'exit' : null); shotButton(state.exitButton); }
       waitForTarget();
       return;
     }
@@ -760,6 +864,7 @@
       document.documentElement.classList.remove('ffc-active', 'ffc-fill-root', 'ffc-hide-siblings');
       backdrop(false);
       cornerButton(null);      // ピッカー中はボタンを出さない (誤爆防止)
+      shotButton(false);
       target = null;
       state.active = false;
     }
@@ -873,6 +978,14 @@
         if (!state.active) { if (IS_TOP) activateTop(); else activateSubframe(); }
         else waitForTarget();
         return Promise.resolve({ ffc: true, ok: true });
+      case 'shotPrepare':
+        shotPrepare(msg.on);
+        return Promise.resolve({ ffc: true, ok: true });
+      case 'shotRect':
+        return Promise.resolve(shotRect());
+      case 'shotSave':
+        if (IS_TOP) saveShot(msg.dataUrl);
+        break;
       case 'step':
         if (!IS_TOP) return undefined;
         return Promise.resolve({ ffc: true, picked: stepTarget() });

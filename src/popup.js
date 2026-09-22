@@ -36,6 +36,23 @@ function paint(st) {
       + '   sync: ' + n(sync.syncCount) + ' / local: ' + n(sync.localCount);
     el.style.removeProperty('color');
   }
+  /* ブラウザズームの現況。拡張が倍率を触っている時だけ出す。
+     scope の指定に失敗していると、タブ単位ではなくサイト単位の設定として
+     記録され、タブを閉じても別タブで開いても残る。気づけるように出す。 */
+  const z = st.zoom || {};
+  const zi = $('zoomInfo');
+  if (z.scopeWarn) {
+    zi.textContent = '⚠ ブラウザズーム ' + (z.now == null ? '?' : z.now + '%')
+      + ' — タブ単位の指定に失敗 (サイト設定として残ります): ' + z.scopeWarn;
+    zi.style.color = '#d3455b';
+  } else if (z.saved != null) {
+    zi.textContent = 'ブラウザズーム ' + z.now + '% (解除すると ' + z.saved + '% に戻します)';
+    zi.style.removeProperty('color');
+  } else {
+    zi.textContent = '';
+    zi.style.removeProperty('color');
+  }
+
   // local にしか無い設定がある時だけ復元ボタンを出す
   const canRestore = (sync.localCount || 0) > (sync.syncCount || 0);
   $('restoreRow').style.display = canRestore ? '' : 'none';
