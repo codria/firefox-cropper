@@ -107,7 +107,6 @@ select {
 .buttons .ghost { color: var(--dim); }
 
 .saved {
-  min-height: 15px;
   margin-top: 8px;
   font-size: 10px;
   color: var(--dim);
@@ -184,6 +183,12 @@ button.wide { width: 100%; padding: 6px; font: inherit; color: var(--dim);
   cursor: pointer;
 }
 .site .del:hover { color: #fff; background: #d3455b; border-color: #d3455b; }
+
+/* 中身が空の行は畳む。min-height で場所を確保しておくと、
+   滅多に文字が出ない行 (候補送りの結果など) が常に隙間として残る。 */
+.saved:empty {
+  display: none;
+}
 
 .foot {
   margin-top: 10px;
