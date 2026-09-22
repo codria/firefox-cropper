@@ -10,8 +10,23 @@
   :root { --fg: #e8eaee; --dim: #9aa0ad; --line: #3a3d45; --bg: #202126; }
 }
 
+/* 縦スクロールバーが出ると、その分 (約 15px) だけ表示幅が削られる。
+   body を固定幅にしていると子要素が収まらなくなり、横スクロールバーまで出る。
+   max-width: 100% を付けて body 自身が縮めるようにし、
+   box-sizing: border-box で padding を幅の内側に収める。 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  overflow-x: hidden;
+}
+
 body {
-  width: 300px;
+  width: 320px;
+  max-width: 100%;
   margin: 0;
   padding: 12px;
   font: 13px/1.5 system-ui, "Segoe UI", "Yu Gothic UI", sans-serif;
