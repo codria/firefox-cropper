@@ -60,6 +60,45 @@ function noteFrame(tabId, frameId) {
   set.add(frameId);
 }
 
+/* 設定の保存先。storage.sync は Firefox アカウント経由で端末間を同期する
+   (中身は E2E 暗号化される)。sync が使えない環境では local に落とす。
+
+   容量の制限: 合計 102400 / 1項目 8192 バイト。sites は 1 項目に全サイトを
+   まとめて入れるため、サイト数が数十を超えると書き込みに失敗する。
+   失敗を握りつぶすと「同期されないのに気づかない」状態になるので、
+   最後のエラーを保持してパネルに出す。 */
+const STORE = api.storage.sync || api.storage.local;
+const SYNCED = !!api.storage.sync;
+let storeError = null;
+
+/* local に残っている設定を一度だけ sync へ移す。
+   sync 側に既に何かあれば移行済みとみなして触らない
+   (2 台目で走らせた時に、空の local で上書きしてしまわないように)。 */
+async function migrateToSync() {
+  if (!SYNCED) return;
+  const cur = await api.storage.sync.get(['sites', 'settings']);
+  if (cur.sites || cur.settings) return;
+  const old = await api.storage.local.get(['sites', 'settings']);
+  if (!old.sites && !old.settings) return;
+  await api.storage.sync.set(old);
+}
+
+/* 移行が終わるまで読み書きを待たせる。待たないと、移行中の読み取りが
+   空の sync を見てしまい「設定が消えた」ように見える。 */
+const storeReady = migrateToSync().catch((e) => { storeError = '移行: ' + e.message; });
+
+async function storeSet(obj) {
+  await storeReady;
+  try {
+    await STORE.set(obj);
+    storeError = null;
+  } catch (e) {
+    // 容量超過が主な原因。黙って落とすと同期されていないことに気づけない
+    storeError = e.message;
+    throw e;
+  }
+}
+
 const hostOf = (url) => { try { return new URL(url).hostname; } catch (_) { return ''; } };
 
 /* 設定の保存キー。ホスト名だけだと、1 つのホストの下にぶら下がる
@@ -91,12 +130,14 @@ async function siteFor(url) {
 }
 
 async function getSettings() {
-  const got = await api.storage.local.get('settings');
+  await storeReady;
+  const got = await STORE.get('settings');
   return Object.assign({}, DEFAULTS, got.settings || {});
 }
 
 async function getSites() {
-  const got = await api.storage.local.get('sites');
+  await storeReady;
+  const got = await STORE.get('sites');
   return got.sites || {};
 }
 
@@ -104,7 +145,7 @@ async function patchSite(host, patch) {
   if (!host) return;
   const sites = await getSites();
   sites[host] = Object.assign({}, sites[host], patch);
-  await api.storage.local.set({ sites });
+  await storeSet({ sites });
 }
 
 async function payloadFor(url) {
@@ -251,7 +292,7 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
         const site = Object.assign({}, sites[topHost]);
         site.sub = Object.assign({}, site.sub, { [msg.frameKey]: msg.selector });
         sites[topHost] = site;
-        await api.storage.local.set({ sites });
+        await storeSet({ sites });
       }
       if (!activeTabs.has(tabId)) { if (tab) await activate(tabId, tab.url); }
       else {
@@ -330,7 +371,8 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
         active: activeTabs.has(t.id),
         host,
         settings: await getSettings(),
-        site: await siteFor(t.url)
+        site: await siteFor(t.url),
+        sync: { enabled: SYNCED, error: storeError }
       };
     }
 
@@ -388,7 +430,7 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
 
     case 'popup:setSettings': {
       const s = Object.assign(await getSettings(), msg.patch);
-      await api.storage.local.set({ settings: s });
+      await storeSet({ settings: s });
       if (msg.tab) await reapply(msg.tab.id, msg.tab.url);
       return { ffc: true, settings: s };
     }
@@ -417,7 +459,7 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
     case 'popup:deleteSite': {
       const sites = await getSites();
       delete sites[msg.key];
-      await api.storage.local.set({ sites });
+      await storeSet({ sites });
       // 今開いているサイトを消したなら、その場の切り抜きも解除する
       if (msg.tab && siteKeyOf(msg.tab.url) === msg.key && activeTabs.has(msg.tab.id)) {
         deactivate(msg.tab.id);
@@ -442,6 +484,21 @@ api.commands.onCommand.addListener(async (name) => {
   if (name === 'toggle-crop') await stepTab(tab);
   else if (name === 'pick-element') send(tab.id, { ffc: true, cmd: 'pick' }, { frameId: 0 });
 });
+
+/* 他の端末で設定が変わったら、このタブにも反映させる。
+   読み取りは都度ストアを見る作りなので、貼り直すだけでよい。 */
+if (api.storage.onChanged) {
+  api.storage.onChanged.addListener(async (changes, area) => {
+    if (area !== (SYNCED ? 'sync' : 'local')) return;
+    if (!changes.sites && !changes.settings) return;
+    for (const [tabId, cur] of activeTabs) {
+      try {
+        const tab = await api.tabs.get(tabId);
+        await reapply(tabId, tab.url);
+      } catch (_) { /* タブが既に無い */ }
+    }
+  });
+}
 
 api.tabs.onRemoved.addListener((tabId) => {
   activeTabs.delete(tabId); tabFrames.delete(tabId); savedZoom.delete(tabId);

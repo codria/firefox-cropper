@@ -20,6 +20,20 @@ function paint(st) {
   $('saved').textContent = st.site && st.site.selector
     ? '記憶中の対象: ' + st.site.selector
     : '対象: 自動検出 (未確定)';
+
+  /* 同期の状態。失敗しても黙っていると「同期されないことに気づけない」ので出す。
+     主な失敗要因は容量超過 (sites は 1 項目 8192 バイトまで)。 */
+  const sync = st.sync || {};
+  const el = $('syncInfo');
+  if (sync.error) {
+    el.textContent = '⚠ 設定の保存に失敗: ' + sync.error;
+    el.style.color = '#d3455b';
+  } else {
+    el.textContent = sync.enabled
+      ? '設定は端末間で同期されます (Firefox アカウント経由)'
+      : '設定はこの端末にのみ保存されます';
+    el.style.removeProperty('color');
+  }
 }
 
 async function refresh() {
