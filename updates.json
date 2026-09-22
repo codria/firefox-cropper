@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "frame-cropper@sleep.local": {
+      "updates": [
+        {
+          "version": "0.2.0",
+          "update_link": "https://github.com/codria/firefox-cropper/releases/download/v0.2.0/frame-cropper-0.2.0.xpi"
+        }
+      ]
+    }
+  }
+}

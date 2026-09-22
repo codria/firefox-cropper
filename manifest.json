@@ -1,13 +1,14 @@
 {
   "manifest_version": 2,
   "name": "Frame Cropper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ページ内の埋め込みコンテンツ (iframe / canvas) だけをウィンドウいっぱいに表示する",
 
   "browser_specific_settings": {
     "gecko": {
       "id": "frame-cropper@sleep.local",
       "strict_min_version": "140.0",
+      "update_url": "https://raw.githubusercontent.com/codria/firefox-cropper/main/updates.json",
       "data_collection_permissions": {
         "required": ["none"]
       }
