@@ -57,6 +57,15 @@ async function rememberZoom(url, zoom) {
   } catch (_) {}
 }
 
+async function keptZoom(url) {
+  const origin = originOf(url);
+  if (!origin) return undefined;
+  try {
+    const got = await api.storage.local.get('zoomRestore');
+    return (got.zoomRestore || {})[origin];
+  } catch (_) { return undefined; }
+}
+
 async function forgetZoom(url) {
   const origin = originOf(url);
   if (!origin) return;
@@ -72,15 +81,11 @@ async function forgetZoom(url) {
 const originOf = (url) => { try { return new URL(url).origin; } catch (_) { return ''; } };
 
 async function restoreZoom(tabId, url) {
-  let z = savedZoom.get(tabId);
+  const mem = savedZoom.get(tabId);
   savedZoom.delete(tabId);
-  if (z === undefined) {
-    // 再起動を跨いだ場合。控えておいた倍率で戻す
-    try {
-      const got = await api.storage.local.get('zoomRestore');
-      z = (got.zoomRestore || {})[originOf(url)];
-    } catch (_) {}
-  }
+  // ディスクの控えを優先する。こちらは一度しか書かないので、ずり上がらない
+  const kept = await keptZoom(url);
+  const z = kept !== undefined ? kept : mem;
   if (z === undefined) return;
   try { await api.tabs.setZoom(tabId, z); note(tabId, { at: stamp(), result: '復元 → ' + z }); }
   catch (e) { note(tabId, { at: stamp(), error: '復元失敗: ' + e.message }); }
@@ -238,24 +243,34 @@ const storeReady = snapshotSync()
    同期が効いていない時、原因は「sync に書けていない」「sync にはあるが
    端末に降りてきていない」のどちらか。件数を見比べれば切り分けられる。
    サイトのキー自体は URL なので、件数だけを返して中身は出さない。 */
+/* パネルの「sync: N件」と同じ数え方。全キー数には全体設定も入るので、
+   そのまま比べると減っていないのに「控えの方が多い」と誤判定する。 */
+function countSites(data) {
+  const set = new Set(Object.keys((data && data.sites) || {}));
+  for (const k of Object.keys(data || {})) {
+    if (k.startsWith(SITE_PREFIX)) set.add(k.slice(SITE_PREFIX.length));
+  }
+  return set.size;
+}
+
 async function syncStatus() {
   /* 新旧どちらのレイアウトも数える。旧キー (sites) だけを見ていると、
      splitSites で s:<キー> に分割した後は常に 0 と表示され、
      「同期が効いていない」と誤診する材料になる。 */
+  // 控えとの比較で両辺が食い違わないよう、数え方は countSites 一本にする
   const count = async (area) => {
-    try {
-      const all = await api.storage[area].get(null);
-      const keys = new Set(Object.keys(all.sites || {}));
-      for (const k of Object.keys(all)) {
-        if (k.startsWith(SITE_PREFIX)) keys.add(k.slice(SITE_PREFIX.length));
-      }
-      return keys.size;
-    } catch (_) { return null; }
+    try { return countSites(await api.storage[area].get(null)); }
+    catch (_) { return null; }
   };
   let backups = [], startup = [];
   try {
     const got = await api.storage.local.get(['ffcBackup', 'ffcStartupLog']);
-    backups = (got.ffcBackup || []).map((b) => ({ at: b.at, count: b.count }));
+    /* サイト件数は控えの中身から数える。保存時に書き込む形だと、既に
+       書かれている控えには入っておらず、いざ設定が飛んだ時 (控えは
+       上書きされない) に復元ボタンが出ないまま終わる。 */
+    backups = (got.ffcBackup || []).map((b) => ({
+      at: b.at, count: b.count, sites: countSites(b.data),
+    }));
     startup = got.ffcStartupLog || [];
   } catch (_) {}
   return {
@@ -276,9 +291,18 @@ async function zoomStatus(tabId) {
   try { now = await api.tabs.getZoom(tabId); } catch (_) {}
   const hist = zoomLog.get(tabId) || [];
   const warn = hist.filter((h) => h.scopeWarn).pop();
+  /* 表示する「元の倍率」もディスクの控えを正とする。メモリ側は
+     background の再起動で失われ、再取得するとこちらが設定した倍率を
+     拾ってしまうので、それを出すと解除先が拡大後の値に見えてしまう。 */
+  let base;
+  try {
+    const tab = await api.tabs.get(tabId);
+    base = await keptZoom(tab && tab.url);
+  } catch (_) {}
+  if (base === undefined) base = savedZoom.get(tabId);
   return {
     now: now == null ? null : Math.round(now * 100),
-    saved: savedZoom.has(tabId) ? Math.round(savedZoom.get(tabId) * 100) : null,
+    saved: base === undefined ? null : Math.round(base * 100),
     scopeWarn: warn ? warn.scopeWarn : null,
   };
 }
@@ -553,8 +577,13 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
          こちらでできるのは「解除時と読み込み時に必ず元へ戻す」ことだけなので、
          失敗する呼び出しは行わず、元の倍率を確実に控えることに集中する。 */
       if (!savedZoom.has(tabId)) {
-        savedZoom.set(tabId, cur);
-        rememberZoom(tab && tab.url, cur);
+        /* background は更新のたびに再起動し、その時点の倍率 (こちらが設定した値)
+           を「元の倍率」として控えてしまう。一度ディスクに書いた値を正とし、
+           あればそれを採る。そうしないと解除しても元へ戻らず、
+           拡大した値が新しい基準としてずり上がっていく。 */
+        const kept = await keptZoom(tab && tab.url);
+        savedZoom.set(tabId, kept !== undefined ? kept : cur);
+        if (kept === undefined) await rememberZoom(tab && tab.url, cur);
       }
       const baseW = msg.vw * cur, baseH = msg.vh * cur;
       let z = Math.min(baseW / msg.w, baseH / msg.h);

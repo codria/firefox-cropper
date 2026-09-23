@@ -60,10 +60,12 @@ function paint(st) {
   /* 起動のたびに控えている世代。今より件数が多い控えがある時だけ出す
      (減っていない時に押させても意味がない)。 */
   const backups = sync.backups || [];
-  const best = backups.find((b) => (b.count || 0) > (sync.syncCount || 0));
+  // サイト件数どうしで比べる。全キー数と比べると、全体設定のぶんだけ
+  // 常に多くなって「減った」と誤判定する
+  const best = backups.find((b) => (b.sites || 0) > (sync.syncCount || 0));
   $('backupRow').style.display = best ? '' : 'none';
   $('backupInfo').textContent = best
-    ? '控え: ' + best.at.slice(0, 19).replace('T', ' ') + ' 時点 / ' + best.count + '項目'
+    ? '控え: ' + best.at.slice(0, 19).replace('T', ' ') + ' 時点 / サイト' + best.sites + '件'
     : (backups.length ? '控え ' + backups.length + '世代あり' : '');
 }
 
@@ -291,7 +293,7 @@ async function init() {
   $('backup').addEventListener('click', async () => {
     const st = await bg('popup:getState');
     const list = (st.sync && st.sync.backups) || [];
-    const i = list.findIndex((b) => (b.count || 0) > ((st.sync && st.sync.syncCount) || 0));
+    const i = list.findIndex((b) => (b.sites || 0) > ((st.sync && st.sync.syncCount) || 0));
     const res = await bg('popup:restoreBackup', { index: i < 0 ? 0 : i });
     $('backupInfo').textContent = (res && res.error)
       ? res.error
