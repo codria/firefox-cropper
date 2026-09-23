@@ -56,6 +56,15 @@ function paint(st) {
   // local にしか無い設定がある時だけ復元ボタンを出す
   const canRestore = (sync.localCount || 0) > (sync.syncCount || 0);
   $('restoreRow').style.display = canRestore ? '' : 'none';
+
+  /* 起動のたびに控えている世代。今より件数が多い控えがある時だけ出す
+     (減っていない時に押させても意味がない)。 */
+  const backups = sync.backups || [];
+  const best = backups.find((b) => (b.count || 0) > (sync.syncCount || 0));
+  $('backupRow').style.display = best ? '' : 'none';
+  $('backupInfo').textContent = best
+    ? '控え: ' + best.at.slice(0, 19).replace('T', ' ') + ' 時点 / ' + best.count + '項目'
+    : (backups.length ? '控え ' + backups.length + '世代あり' : '');
 }
 
 async function refresh() {
@@ -279,6 +288,17 @@ async function init() {
     if ($('candBox').open) await loadCandidates();
   });
   $('siteBox').addEventListener('toggle', (e) => { if (e.target.open) loadSites(); });
+  $('backup').addEventListener('click', async () => {
+    const st = await bg('popup:getState');
+    const list = (st.sync && st.sync.backups) || [];
+    const i = list.findIndex((b) => (b.count || 0) > ((st.sync && st.sync.syncCount) || 0));
+    const res = await bg('popup:restoreBackup', { index: i < 0 ? 0 : i });
+    $('backupInfo').textContent = (res && res.error)
+      ? res.error
+      : '復元しました: ' + ((res && res.restored) || 0) + '項目';
+    await refresh();
+    if ($('siteBox').open) await loadSites();
+  });
   $('restore').addEventListener('click', async () => {
     const res = await bg('popup:restoreFromLocal');
     $('syncInfo').textContent = '復元しました: ' + ((res && res.restored) || 0) + '件';

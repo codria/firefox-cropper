@@ -143,38 +143,93 @@ let storeError = null;
    (2 台目で走らせた時に、空の local で上書きしてしまわないように)。 */
 async function migrateToSync() {
   if (!SYNCED) return;
-  const cur = await api.storage.sync.get(['sites', 'settings']);
-  if (cur.sites || cur.settings) return;
+  /* 「まだ移行していない」の判定は、sync が **完全に空** かどうかで行う。
+     旧レイアウトのキー (sites / settings) の有無で見てはいけない —
+     1 項目ずつに分割した後はそのキー自体が存在しないので、移行済みなのに
+     未移行と判定され、local の古いデータを sync へ書き戻してしまう。
+     background は更新のたびに再起動するので、そのたびに現在の設定が
+     古い内容で上書きされることになる (実際に 2 度飛ばした)。 */
+  const cur = await api.storage.sync.get(null);
+  if (Object.keys(cur).length) return;
   const old = await api.storage.local.get(['sites', 'settings']);
   if (!old.sites && !old.settings) return;
-  await api.storage.sync.set(old);
+  const obj = {};
+  if (old.sites) obj.sites = old.sites;
+  if (old.settings) obj.settings = old.settings;
+  await api.storage.sync.set(obj);
 }
 
 /* 移行が終わるまで読み書きを待たせる。待たないと、移行中の読み取りが
    空の sync を見てしまい「設定が消えた」ように見える。 */
 /* 旧レイアウト (sites に全部入り) を 1 サイト 1 項目へ分割する。
    分割後も getSites() は両方を読むので、片方の端末が古いままでも壊れない。 */
+/* 旧レイアウトを 1 項目ずつに分割する。
+   **既にある項目は上書きしない**。分割は「取り残しの救済」であって、
+   現在の値より古い内容で塗り替えるための処理ではない。
+   書き込みに成功してから旧キーを消す (失敗した時に消すと元も失う)。 */
 async function splitSettings() {
-  const all = await STORE.get('settings');
+  const all = await STORE.get(null);
   if (!all.settings) return;
   const obj = {};
   for (const k of Object.keys(GLOBAL_DEFAULTS)) {
-    if (all.settings[k] !== undefined) obj[GLOBAL_PREFIX + k] = all.settings[k];
+    if (all.settings[k] === undefined) continue;
+    if (GLOBAL_PREFIX + k in all) continue;      // 新しい方が既にある
+    obj[GLOBAL_PREFIX + k] = all.settings[k];
   }
   if (Object.keys(obj).length) await STORE.set(obj);
   await STORE.remove('settings');
 }
 
 async function splitSites() {
-  const all = await STORE.get('sites');
+  const all = await STORE.get(null);
   if (!all.sites || !Object.keys(all.sites).length) return;
   const obj = {};
-  for (const k of Object.keys(all.sites)) obj[SITE_PREFIX + k] = all.sites[k];
-  await STORE.set(obj);
+  for (const k of Object.keys(all.sites)) {
+    if (SITE_PREFIX + k in all) continue;        // 新しい方が既にある
+    obj[SITE_PREFIX + k] = all.sites[k];
+  }
+  if (Object.keys(obj).length) await STORE.set(obj);
   await STORE.remove('sites');
 }
 
-const storeReady = migrateToSync()
+/* 起動のたびに sync の中身を local へ丸ごと控える。
+   設定が消える事故が 2 度起きて、どちらも原因を特定できなかった。
+   原因が分からない以上、**戻せるようにしておく**のが先。
+   local はこの端末にしか無く、同期で壊れることがないので退避先に向く。
+   直近 3 世代を残す (直前の 1 つだけだと、気づく前に空で上書きされる)。 */
+async function snapshotSync() {
+  if (!SYNCED) return;
+  try {
+    const cur = await api.storage.sync.get(null);
+    const n = Object.keys(cur).length;
+    const got = await api.storage.local.get('ffcBackup');
+    const list = got.ffcBackup || [];
+    const last = list[0];
+    // 中身が空、または前回と同じなら残さない (空で世代を埋めてしまわない)
+    if (n && (!last || JSON.stringify(last.data) !== JSON.stringify(cur))) {
+      list.unshift({ at: new Date().toISOString(), count: n, data: cur });
+      while (list.length > 3) list.pop();
+      await api.storage.local.set({ ffcBackup: list });
+    }
+    await noteStartup({ at: new Date().toISOString(), syncKeys: n, backups: list.length });
+  } catch (e) {
+    await noteStartup({ at: new Date().toISOString(), error: e.message });
+  }
+}
+
+/* 起動時に何が起きたかを残す。次に消えた時、これが手掛かりになる。 */
+async function noteStartup(entry) {
+  try {
+    const got = await api.storage.local.get('ffcStartupLog');
+    const list = got.ffcStartupLog || [];
+    list.unshift(entry);
+    while (list.length > 10) list.pop();
+    await api.storage.local.set({ ffcStartupLog: list });
+  } catch (_) {}
+}
+
+const storeReady = snapshotSync()
+  .then(migrateToSync)
   .then(splitSites)
   .then(splitSettings)
   .catch((e) => { storeError = '移行: ' + e.message; });
@@ -197,11 +252,19 @@ async function syncStatus() {
       return keys.size;
     } catch (_) { return null; }
   };
+  let backups = [], startup = [];
+  try {
+    const got = await api.storage.local.get(['ffcBackup', 'ffcStartupLog']);
+    backups = (got.ffcBackup || []).map((b) => ({ at: b.at, count: b.count }));
+    startup = got.ffcStartupLog || [];
+  } catch (_) {}
   return {
     enabled: SYNCED,
     error: storeError,
     syncCount: await count('sync'),
     localCount: await count('local'),
+    backups,
+    startup: startup.slice(0, 3),
   };
 }
 
@@ -702,6 +765,22 @@ api.runtime.onMessage.addListener(async (msg, sender) => {
       for (const k of Object.keys(merged)) obj[SITE_PREFIX + k] = merged[k];
       await storeSet(obj);
       return { ffc: true, restored: Object.keys(merged).length };
+    }
+
+    /* 控えておいた世代から戻す。現在の内容と和集合にする —
+       別端末で増えた設定を巻き添えで消さないため。 */
+    case 'popup:restoreBackup': {
+      const got = await api.storage.local.get('ffcBackup');
+      const list = got.ffcBackup || [];
+      const b = list[msg.index || 0];
+      if (!b) return { ffc: true, error: '控えがありません' };
+      const cur = await STORE.get(null);
+      const obj = {};
+      for (const k of Object.keys(b.data)) {
+        if (!(k in cur)) obj[k] = b.data[k];       // 今あるものは触らない
+      }
+      if (Object.keys(obj).length) await storeSet(obj);
+      return { ffc: true, restored: Object.keys(obj).length };
     }
 
     case 'popup:clearSelector':
